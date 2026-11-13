@@ -97,20 +97,18 @@
     <path d="M400 171.5l2.6 2.8 4.6-5"/>
   </g>
 
-  <!-- done: two settled cards -->
+  <!-- done: folded title rows (click a row to expand) -->
   <g fill="#8a94a6" fill-opacity="0.09" stroke="#8a94a6" stroke-opacity="0.28" stroke-width="1">
-    <rect x="470" y="68" width="108" height="42" rx="9"/>
-    <rect x="470" y="118" width="108" height="42" rx="9"/>
+    <rect x="470" y="68" width="108" height="26" rx="9"/>
+    <rect x="470" y="100" width="108" height="26" rx="9"/>
   </g>
   <g fill="#8a94a6" fill-opacity="0.38">
-    <rect x="478" y="78" width="64" height="5" rx="2.5"/>
-    <rect x="478" y="89" width="86" height="4" rx="2" fill-opacity="0.26"/>
-
-    <rect x="478" y="128" width="52" height="5" rx="2.5"/>
-    <rect x="478" y="139" width="78" height="4" rx="2" fill-opacity="0.26"/>
+    <rect x="486" y="78" width="64" height="5" rx="2.5"/>
+    <rect x="486" y="110" width="52" height="5" rx="2.5"/>
   </g>
-  <g stroke="#3fae6a" stroke-opacity="0.7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
-    <path d="M552 84l2.4 2.6 4.4-4.8"/>
-    <path d="M552 134l2.4 2.6 4.4-4.8"/>
+  <!-- folded rows keep a caret affordance instead of a full card body -->
+  <g stroke="#8a94a6" stroke-opacity="0.55" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M478 79l3.4 3.2-3.4 3.2"/>
+    <path d="M478 111l3.4 3.2-3.4 3.2"/>
   </g>
 </svg>

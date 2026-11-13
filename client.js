@@ -66,8 +66,8 @@ window.__ModuleLoader__.load({
         id: 'done',
         zh: '已完成',
         en: 'Done',
-        hintZh: '你亲手点过完成的卡片。之后在会话里继续聊，它会自动回到进行中。',
-        hintEn: 'Cards you marked done. Continuing the conversation moves them back.',
+        hintZh: '你亲手点过完成的卡片，默认折成一行标题；点标题展开详情。之后在会话里继续聊，它会自动回到进行中。',
+        hintEn: 'Cards you marked done, folded to a title line by default. Click a title to expand. Continuing the conversation moves them back.',
       },
     ]
 
@@ -282,6 +282,37 @@ window.__ModuleLoader__.load({
 .fxk-card:hover { border-color: color-mix(in srgb, var(--fxk-border) 45%, var(--fxk-text-3)); transform: translateY(-1px); }
 .fxk-card:active { transform: translateY(0); }
 .fxk-card[data-state="done"] { opacity: .82; }
+/* 已完成列的折叠态：只留一行标题，点开才展开成完整卡片 */
+.fxk-card-folded {
+  flex-direction: row; align-items: center; gap: 9px;
+  min-height: 32px; padding: 6px 10px;
+}
+.fxk-card-folded[data-state="done"]:hover { opacity: .96; }
+.fxk-card-title-folded {
+  display: block; flex: 1 1 auto; min-width: 0;
+  font-size: 12.5px; line-height: 17px; font-weight: 520;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  -webkit-line-clamp: unset; word-break: normal;
+}
+.fxk-caret {
+  flex: none; width: 6px; height: 6px;
+  border-right: 1.5px solid var(--fxk-text-3);
+  border-bottom: 1.5px solid var(--fxk-text-3);
+  transform: rotate(-45deg);
+  transition: transform 140ms ease, border-color 120ms ease;
+}
+.fxk-caret-open { transform: rotate(45deg); }
+.fxk-card-folded:hover .fxk-caret { border-color: var(--fxk-text-2); }
+/* 展开态的折叠控件：标题行右侧的小箭头 */
+.fxk-card-title-row { display: flex; align-items: flex-start; gap: 6px; }
+.fxk-card-title-row .fxk-card-title { flex: 1 1 auto; min-width: 0; }
+.fxk-card-collapse {
+  flex: none; width: 20px; height: 20px; margin: -2px -3px 0 0; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: transparent;
+  color: var(--fxk-text-3); cursor: pointer;
+}
+.fxk-card-collapse:hover { background: var(--fxk-hover); color: var(--fxk-text); }
 .fxk-card-title {
   font-size: 13.5px; line-height: 19px; font-weight: 560; color: var(--fxk-text);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -484,6 +515,7 @@ window.__ModuleLoader__.load({
   .fxk-skeleton { animation: none; }
   .fxk-overlay, .fxk-sheet, .fxk-toast { animation: none; }
   .fxk-card:hover { transform: none; }
+  .fxk-caret { transition: none; }
 }
 `
 
@@ -623,6 +655,8 @@ window.__ModuleLoader__.load({
       const [modal, setModal] = useState(null)
       const [busy, setBusy] = useState('')
       const [toast, setToast] = useState(null)
+      // 「已完成」列默认折叠成标题行；只有用户点开的那几张会展开，状态只活在这个面板里。
+      const [expandedDone, setExpandedDone] = useState(() => new Set())
       const [syncedAt, setSyncedAt] = useState(0)
       const [now, setNow] = useState(() => Date.now())
       const skewRef = useRef(0)
@@ -842,6 +876,16 @@ window.__ModuleLoader__.load({
         [notify],
       )
 
+      /** 已完成卡片：点标题展开成完整卡片，再点标题旁的箭头折回去。 */
+      const toggleDoneExpanded = useCallback((cardId) => {
+        setExpandedDone((previous) => {
+          const next = new Set(previous)
+          if (next.has(cardId)) next.delete(cardId)
+          else next.add(cardId)
+          return next
+        })
+      }, [])
+
       const visibleCards = useMemo(() => {
         return cards.filter((card) => {
           if (activeWorkspaceId === BUCKET_NONE) return !card.workspaceId
@@ -881,26 +925,82 @@ window.__ModuleLoader__.load({
 
       const renderCard = (card) => {
         const state = card.status
+        const isDone = state === 'done'
+        const isFolded = isDone && !expandedDone.has(card.id)
         const title = workspaceTitle(card.workspaceId)
         const attachmentCount = (card.attachments || []).length
+
+        // 已完成列默认只留标题行：整行点开才展开成完整卡片，避免已归档的卡片一直占满一整列。
+        if (isFolded) {
+          return h(
+            'div',
+            {
+              key: card.id,
+              className: 'fxk-card fxk-card-folded',
+              'data-state': state,
+              role: 'button',
+              tabIndex: 0,
+              'aria-expanded': 'false',
+              'aria-label': t(`${card.title}（已折叠，点击展开）`, `${card.title} (collapsed, click to expand)`),
+              title: t('点击展开', 'Click to expand'),
+              onClick: () => toggleDoneExpanded(card.id),
+              onKeyDown: (event) => {
+                // 整行是 role=button；内部按钮（展开后的折叠箭头等）自己处理键盘，不再冒泡触发整卡。
+                if (event.target !== event.currentTarget) return
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  toggleDoneExpanded(card.id)
+                }
+              },
+            },
+            h('span', { className: 'fxk-caret', 'aria-hidden': 'true' }),
+            h('span', { className: 'fxk-card-title fxk-card-title-folded' }, card.title),
+          )
+        }
+
+        const titleNode = isDone
+          ? h(
+              'div',
+              { className: 'fxk-card-title-row' },
+              h('div', { className: 'fxk-card-title' }, card.title),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'fxk-card-collapse',
+                  'aria-expanded': 'true',
+                  'aria-label': t('折叠这张卡片', 'Collapse this card'),
+                  title: t('折叠', 'Collapse'),
+                  onClick: (event) => {
+                    event.stopPropagation()
+                    toggleDoneExpanded(card.id)
+                  },
+                },
+                h('span', { className: 'fxk-caret fxk-caret-open', 'aria-hidden': 'true' }),
+              ),
+            )
+          : h('div', { className: 'fxk-card-title' }, card.title)
+
         return h(
           'div',
           {
             key: card.id,
-            className: 'fxk-card',
+            className: isDone ? 'fxk-card fxk-card-expanded' : 'fxk-card',
             'data-state': state,
             role: 'button',
             tabIndex: 0,
             'aria-label': card.title,
             onClick: () => openCard(card),
             onKeyDown: (event) => {
+              // 内部按钮（折叠箭头 / 撤销 / 执行）自己处理键盘，不再冒泡触发「打开会话」。
+              if (event.target !== event.currentTarget) return
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault()
                 openCard(card)
               }
             },
           },
-          h('div', { className: 'fxk-card-title' }, card.title),
+          titleNode,
           card.body ? h('div', { className: 'fxk-card-excerpt' }, excerptOf(card.body)) : null,
           h(
             'div',
