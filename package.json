@@ -1,0 +1,35 @@
+{
+  "name": "dsh-kanban-fx",
+  "version": "0.1.4",
+  "private": true,
+  "type": "module",
+  "description": "任务看板：待办 / 进行中 / 待审核 / 已完成，点执行即开会话开始跑",
+  "engines": {
+    "dsh": "^0.2.2-rc.1"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "docs",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}

@@ -1,0 +1,13 @@
+# dsh-kanban-fx —— 任务看板
+# 本地开发安装：
+#   dsh plugin --profile desktop add link:<本目录绝对路径>
+- insert:
+    - id: dsh-kanban-fx
+      name: dsh-kanban-fx
+      config:
+        # 看板数据目录；留空使用 $DSH_HOME/dsh-kanban-fx
+        dataDir: ''
+        # 单张卡片正文上限（字符）
+        maxBodyChars: 200000
+        # 单张卡片附件总大小上限（字节）
+        maxCardAttachmentBytes: 25165824
