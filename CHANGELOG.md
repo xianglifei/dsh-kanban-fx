@@ -4,6 +4,7 @@
 
 - 首次公开发布：源码托管到 GitHub 公开仓库 `xianglifei/dsh-kanban-fx`，采用 MIT 许可。
 - README 增补仓库地址、`github:` 安装方式与许可说明；新增 `LICENSE`。
+- 新增 `AGENTS.md` 记录推送约定：以后每次 push 都要同步 `README.md` 与 `CHANGELOG.md`，版本号与顶部条目保持一致。
 - 无功能变更，仅发布相关整理；版本号同步到 0.1.4。
 
 ## 0.1.3 — 2026-11-13

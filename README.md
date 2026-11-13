@@ -131,6 +131,8 @@ dsh plugin --profile desktop add link:/Users/xianglifei/Code/Github/dsh-kanban-f
 
 - `index.js`：Host 半（存储、HTTP、执行、状态机）。
 - `client.js`：Client 半（侧边栏入口、看板面板、新建/详情抽屉）。
+- 推送约定：**每次 push 前都要更新 `README.md` 与 `CHANGELOG.md`**，细则见 [AGENTS.md](AGENTS.md)；
+  版本号与 CHANGELOG 顶部保持一致。
 - 只看 node 内置模块与 `ctx` 上的服务，不 import 任何 `@deepseek-ai/*` 包，所以不需要构建步骤。
 - 自查脚本（在 `/tmp`，不进仓库）：Host 半用假 ctx 跑真实路由与状态机；Client 半用真实 React + 真实 CSS
   在无头 Chrome 里跑交互（自动保存、关栏补存、深色 / 窄屏 / 按钮对比度），文档里的截图也由它生成。
