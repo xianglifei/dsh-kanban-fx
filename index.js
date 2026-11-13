@@ -90,6 +90,7 @@ function normalizeSettings(config) {
 function viewOf(card) {
   return {
     id: card.id,
+    seq: Number.isInteger(card.seq) && card.seq > 0 ? card.seq : null,
     title: card.title,
     body: card.body,
     workspaceId: card.workspaceId,
@@ -117,7 +118,7 @@ function viewOf(card) {
 }
 
 function emptyStore() {
-  return { version: STORE_VERSION, rev: 1, lastWorkspaceId: null, cards: {} }
+  return { version: STORE_VERSION, rev: 1, nextSeq: 1, lastWorkspaceId: null, cards: {} }
 }
 
 function loadStore(file) {
@@ -130,6 +131,7 @@ function loadStore(file) {
       if (!card || typeof card !== 'object') continue
       cards[id] = {
         id,
+        seq: null,
         title: textOf(card.title, 120) || '未命名事项',
         body: typeof card.body === 'string' ? card.body : '',
         workspaceId: typeof card.workspaceId === 'string' && card.workspaceId ? card.workspaceId : null,
@@ -146,9 +148,31 @@ function loadStore(file) {
         error: typeof card.error === 'string' && card.error ? card.error : null,
       }
     }
+    // 卡片编号（fx-N）：先收下旧数据里已有的编号，缺的按创建时间补一轮。
+    // 编号只增不复用：删掉卡片后留下的空号不会再发给下一张卡。
+    const ordered = Object.values(cards).sort(
+      (left, right) => left.createdAt - right.createdAt || String(left.id).localeCompare(String(right.id)),
+    )
+    const used = new Set()
+    for (const card of ordered) {
+      const seq = Number(parsed.cards[card.id]?.seq)
+      if (Number.isInteger(seq) && seq > 0 && !used.has(seq)) {
+        card.seq = seq
+        used.add(seq)
+      }
+    }
+    let highest = 0
+    for (const seq of used) highest = Math.max(highest, seq)
+    for (const card of ordered) {
+      if (card.seq) continue
+      highest += 1
+      card.seq = highest
+    }
+    const storedNext = Number(parsed.nextSeq)
     return {
       version: Number(parsed.version) || STORE_VERSION,
       rev: Number(parsed.rev) || 1,
+      nextSeq: Number.isInteger(storedNext) && storedNext > highest + 1 ? storedNext : highest + 1,
       lastWorkspaceId: typeof parsed.lastWorkspaceId === 'string' ? parsed.lastWorkspaceId : null,
       cards,
     }
@@ -486,10 +510,18 @@ export function apply(ctx, config) {
     return card
   }
 
+  /** 给新卡片分配短编号（对用户显示为 fx-N）。只增不减，删卡不回收。 */
+  function allocateSeq() {
+    const seq = Number.isInteger(store.nextSeq) && store.nextSeq > 0 ? store.nextSeq : 1
+    store.nextSeq = seq + 1
+    return seq
+  }
+
   async function createCard(input, run) {
     const attachments = await saveAttachments(input?.attachments)
     const card = {
       id: `card-${randomUUID()}`,
+      seq: allocateSeq(),
       title: deriveTitle(input?.title, input?.body),
       body: textOf(input?.body, settings.maxBodyChars),
       workspaceId: typeof input?.workspaceId === 'string' && input.workspaceId ? input.workspaceId : null,

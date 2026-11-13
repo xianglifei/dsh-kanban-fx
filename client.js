@@ -369,6 +369,18 @@ window.__ModuleLoader__.load({
   border-bottom: 1px solid var(--fxk-border-soft);
 }
 .fxk-sheet-title { font-size: 15px; line-height: 22px; font-weight: 600; }
+/* 卡片编号：安静地跟在标题后面，像个文件编号；点一下复制 */
+.fxk-sheet-seq {
+  flex: none; align-self: center;
+  margin: -1px 0 0 -4px; padding: 1px 4px;
+  border: 0; border-radius: 5px; background: transparent;
+  font-family: var(--fxk-mono); font-size: 10.5px; line-height: 16px;
+  font-variant-numeric: tabular-nums; letter-spacing: .02em;
+  color: var(--fxk-text-3); cursor: copy; user-select: none;
+  transition: color 120ms, background 120ms;
+}
+.fxk-sheet-seq:hover { color: var(--fxk-text-2); background: var(--fxk-hover); }
+.fxk-sheet-seq:focus-visible { outline: 2px solid color-mix(in srgb, var(--fxk-link) 45%, transparent); outline-offset: 1px; }
 .fxk-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 12px; }
 .fxk-sheet-foot {
   flex: none; display: flex; align-items: center; gap: 8px;
@@ -559,6 +571,12 @@ window.__ModuleLoader__.load({
       return text.length > 220 ? `${text.slice(0, 220)}…` : text
     }
 
+    /** 卡片编号：对用户显示成 fx-1、fx-2……；还没落库的草稿没有编号。 */
+    function cardSeqLabel(card) {
+      const seq = Number(card && card.seq)
+      return Number.isInteger(seq) && seq > 0 ? `fx-${seq}` : ''
+    }
+
     function readAsBase64(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader()
@@ -570,6 +588,29 @@ window.__ModuleLoader__.load({
         reader.onerror = () => reject(new Error(t('读取文件失败', 'Could not read the file')))
         reader.readAsDataURL(file)
       })
+    }
+
+    /** 复制一段短文本：优先异步剪贴板，不行就退回选中复制；都失败返回 false。 */
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text)
+        return true
+      } catch {}
+      try {
+        const area = document.createElement('textarea')
+        area.value = text
+        area.setAttribute('readonly', '')
+        area.style.position = 'fixed'
+        area.style.top = '-1000px'
+        area.style.opacity = '0'
+        document.body.appendChild(area)
+        area.select()
+        const copied = document.execCommand('copy')
+        area.remove()
+        return copied
+      } catch {
+        return false
+      }
     }
 
     // ----------------------------------------------------------------- panel
@@ -1205,6 +1246,8 @@ window.__ModuleLoader__.load({
       const [dragging, setDragging] = useState(false)
       // 第一次自动保存后卡片就落库了，之后都走 update
       const [savedId, setSavedId] = useState(card ? card.id : null)
+      // 卡片短编号（fx-N）由 Host 在落库时分配；草稿阶段还没有
+      const [savedSeq, setSavedSeq] = useState(card && card.seq ? Number(card.seq) : null)
       const [auto, setAuto] = useState({ kind: 'idle', at: 0 })
       const fileRef = useRef(null)
       const addedRef = useRef(added)
@@ -1255,6 +1298,7 @@ window.__ModuleLoader__.load({
               if (!saved) throw new Error(t('保存失败', 'Save failed'))
               savedIdRef.current = saved.id
               setSavedId(saved.id)
+              if (saved.seq) setSavedSeq(Number(saved.seq))
               // 落库到别的工作区时，让看板视图跟过去（同工作区时父层直接 no-op）
               onSavedRef.current?.(saved)
               // 附件这次已经落库：把「待上传」转成「已在库」，避免每 8 秒重传 base64
@@ -1390,7 +1434,14 @@ window.__ModuleLoader__.load({
               await post('run', { id: saved.id }, { silent: true })
               notify({ text: t('已开始执行，卡片进入进行中', 'Started — the card is now running') })
             } else {
-              notify({ text: mode === 'edit' ? t('已保存', 'Saved') : t('已保存为待办', 'Saved to To do') })
+              const seqLabel = mode === 'edit' ? '' : cardSeqLabel(saved)
+              notify({
+                text: seqLabel
+                  ? t(`已保存为待办 · ${seqLabel}`, `Saved to To do · ${seqLabel}`)
+                  : mode === 'edit'
+                    ? t('已保存', 'Saved')
+                    : t('已保存为待办', 'Saved to To do'),
+              })
             }
             dirtyRef.current = false
             onClose()
@@ -1443,6 +1494,17 @@ window.__ModuleLoader__.load({
       }, [card, busy, post, notify, onClose])
 
       const heading = mode === 'edit' ? t('编辑待办', 'Edit card') : t('新建待办', 'New card')
+      const seqText = savedSeq ? `fx-${savedSeq}` : ''
+      const copySeq = () => {
+        if (!seqText) return
+        void copyText(seqText).then((ok) => {
+          notify({
+            text: ok
+              ? t(`已复制编号 ${seqText}`, `Copied ${seqText}`)
+              : t(`复制失败，编号 ${seqText}`, `Copy failed — ${seqText}`),
+          })
+        })
+      }
       const autoText =
         auto.kind === 'saving'
           ? t('自动保存中…', 'Auto-saving…')
@@ -1477,6 +1539,19 @@ window.__ModuleLoader__.load({
             'header',
             { className: 'fxk-sheet-head' },
             h('span', { className: 'fxk-sheet-title' }, heading),
+            seqText
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'fxk-sheet-seq',
+                    title: t('卡片编号，点一下复制', 'Card number — click to copy'),
+                    'aria-label': t(`复制卡片编号 ${seqText}`, `Copy card number ${seqText}`),
+                    onClick: copySeq,
+                  },
+                  seqText,
+                )
+              : null,
             h('span', { className: 'fxk-sheet-spacer' }),
             h('button', { type: 'button', className: 'fxk-btn fxk-btn-icon', disabled: Boolean(busy), 'aria-label': t('关闭', 'Close'), onClick: close }, '✕'),
           ),
