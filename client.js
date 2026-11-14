@@ -40,6 +40,54 @@ window.__ModuleLoader__.load({
       } catch {}
     }
 
+    // 视图（看板 / 列表）和列表排序也只写浏览器本地；默认看板，不打断现有用户。
+    const VIEW_MODE_KEY = 'dsh-kanban-fx.view'
+    const SORT_STATE_KEY = 'dsh-kanban-fx.sort'
+    const VIEW_MODES = ['board', 'list']
+
+    // 列表的列。key 同时是排序键；actions 只是占位，不参与排序。
+    const LIST_COLUMNS = [
+      { key: 'status', zh: '状态', en: 'Status', cls: 'c-status', dir: 'asc', sortable: true },
+      { key: 'seq', zh: '编号', en: 'No.', cls: 'c-seq', dir: 'asc', sortable: true },
+      { key: 'title', zh: '任务', en: 'Task', cls: 'c-task', dir: 'asc', sortable: true },
+      { key: 'duration', zh: '用时', en: 'Duration', cls: 'c-dur', dir: 'desc', sortable: true, align: 'right' },
+      { key: 'updated', zh: '更新', en: 'Updated', cls: 'c-upd', dir: 'desc', sortable: true, align: 'right' },
+      { key: 'actions', zh: '操作', en: 'Actions', cls: 'c-acts', sortable: false, align: 'right' },
+    ]
+    const STATUS_RANK = { todo: 0, running: 1, review: 2, done: 3 }
+    // 用户定的默认：按第一列状态、流程顺序，待办在最上面。
+    const DEFAULT_SORT = { key: 'status', dir: 'asc' }
+
+    function readViewMode() {
+      try {
+        const value = String(window.localStorage.getItem(VIEW_MODE_KEY) || '')
+        return VIEW_MODES.includes(value) ? value : 'board'
+      } catch {
+        return 'board'
+      }
+    }
+
+    function persistViewMode(mode) {
+      try {
+        window.localStorage.setItem(VIEW_MODE_KEY, mode)
+      } catch {}
+    }
+
+    function readSortState() {
+      try {
+        const [key, dir] = String(window.localStorage.getItem(SORT_STATE_KEY) || '').split(':')
+        const column = LIST_COLUMNS.find((item) => item.key === key && item.sortable)
+        if (column && (dir === 'asc' || dir === 'desc')) return { key, dir }
+      } catch {}
+      return { ...DEFAULT_SORT }
+    }
+
+    function persistSortState(sort) {
+      try {
+        window.localStorage.setItem(SORT_STATE_KEY, `${sort.key}:${sort.dir}`)
+      } catch {}
+    }
+
     const COLUMNS = [
       {
         id: 'todo',
@@ -83,6 +131,12 @@ window.__ModuleLoader__.load({
       return zhCache
     }
     const t = (cn, en) => (isZh() ? cn : en)
+
+    /** 状态 → 看板列的中文 / 英文名；列表和看板共用一套叫法。 */
+    function statusLabelOf(status) {
+      const column = COLUMNS.find((item) => item.id === status)
+      return column ? t(column.zh, column.en) : String(status || '')
+    }
 
     // ------------------------------------------- session header (card status)
     // 会话 → 卡片的探测结果：命中先画、再后台刷新，切回会话时标题栏不会闪一下空。
@@ -178,7 +232,7 @@ window.__ModuleLoader__.load({
 .fxk-head {
   flex: none;
   width: 100%;
-  max-width: 1240px;
+  max-width: 1400px;
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -245,10 +299,34 @@ window.__ModuleLoader__.load({
 .fxk-sync:active { color: var(--fxk-text-2); }
 .fxk-sync:focus-visible { outline: 2px solid color-mix(in srgb, var(--fxk-brand) 55%, transparent); outline-offset: 1px; }
 
+/* 视图切换：紧跟着页面标题，属于「这页是什么」，不和右侧的工作区 / 新建混在一组。
+   两段式小控件，当前段浮起来；窄到 380px 以下只剩图标（aria-label 仍在）。 */
+.fxk-viewswitch {
+  display: inline-flex; align-items: center; gap: 2px; flex: none;
+  height: 28px; margin-left: 6px; padding: 2px;
+  border-radius: 8px; background: var(--fxk-hover);
+}
+.fxk-viewswitch button {
+  height: 24px; padding: 0 10px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--fxk-text-2);
+  font-size: 12px; line-height: 1; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  cursor: pointer;
+  transition: color 120ms, background 120ms;
+}
+.fxk-viewswitch button:hover { color: var(--fxk-text); }
+.fxk-viewswitch button[data-active="true"] {
+  background: var(--fxk-card); color: var(--fxk-text); font-weight: 560;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .08), 0 0 0 1px var(--fxk-border-soft);
+}
+.fxk-viewswitch button:focus-visible { outline-offset: 1px; }
+.fxk-viewswitch svg { display: block; }
+.fxk-viewswitch-label { display: inline-block; }
+
 /* ----------------------------------------------------------------- board */
 .fxk-board {
   flex: 1; min-height: 0;
-  width: 100%; max-width: 1240px; margin: 0 auto;
+  width: 100%; max-width: 1400px; margin: 0 auto;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 22px;
@@ -400,10 +478,159 @@ window.__ModuleLoader__.load({
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 
+/* ----------------------------------------------------------------- list */
+/* 平铺表格：一张随内容伸缩的面板，表头 sticky；状态是行内字段，不是分组。 */
+.fxk-listwrap {
+  flex: 1; min-height: 0;
+  width: 100%; max-width: 1400px; margin: 0 auto;
+  display: flex; align-items: flex-start;
+  padding: 0 20px 20px;
+}
+.fxk-tablepanel {
+  width: 100%; height: auto; max-height: 100%;
+  display: flex; flex-direction: column; min-width: 0;
+  background: var(--fxk-card);
+  border: 1px solid var(--fxk-border);
+  border-radius: 14px;
+  box-shadow: var(--fxk-shadow);
+  overflow: hidden;
+}
+.fxk-tablescroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.fxk-tablescroll::-webkit-scrollbar { width: 8px; }
+.fxk-tablescroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--fxk-text) 16%, transparent); border-radius: 8px; }
+.fxk-table {
+  width: 100%; table-layout: fixed;
+  border-collapse: separate; border-spacing: 0;
+}
+.fxk-table thead th.c-status { width: 116px; }
+.fxk-table thead th.c-seq { width: 82px; }
+.fxk-table thead th.c-dur { width: 112px; }
+.fxk-table thead th.c-upd { width: 136px; }
+.fxk-table thead th.c-acts { width: 112px; }
+
+/* 表头：整格可点，th 上带 aria-sort；sticky 只在这一块里生效 */
+.fxk-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  height: 36px; padding: 0 8px;
+  background: color-mix(in srgb, var(--fxk-card) 86%, var(--fxk-surface));
+  border-bottom: 1px solid var(--fxk-border);
+  font-size: 11.5px; line-height: 1; font-weight: 500;
+  color: var(--fxk-text-2); text-align: left; white-space: nowrap;
+}
+.fxk-table thead th:first-child { padding-left: 16px; }
+.fxk-table thead th:last-child { padding-right: 16px; }
+.fxk-table thead th.is-right { text-align: right; }
+.fxk-thbtn {
+  width: 100%; height: 100%; padding: 0; border: 0; border-radius: 6px;
+  display: inline-flex; align-items: center; gap: 4px;
+  background: transparent; color: inherit;
+  font-size: 11.5px; line-height: 1; font-weight: 500;
+  text-align: left; white-space: nowrap; cursor: pointer;
+}
+.fxk-thbtn.is-right { justify-content: flex-end; }
+.fxk-thbtn:hover { color: var(--fxk-text); }
+.fxk-thbtn[data-active="true"] { color: var(--fxk-text); font-weight: 560; }
+.fxk-sort { display: inline-flex; opacity: .55; transition: opacity 120ms; }
+.fxk-thbtn:hover .fxk-sort { opacity: .85; }
+.fxk-thbtn[data-active="true"] .fxk-sort { opacity: 1; }
+
+/* 行：单行标题，列宽固定，只有文字省略，不换行 */
+.fxk-table tbody td {
+  height: 50px; padding: 0 8px;
+  border-bottom: 1px solid var(--fxk-border-soft);
+  font-size: 13px; color: var(--fxk-text);
+  background: transparent;
+}
+.fxk-table tbody td:first-child { padding-left: 16px; }
+.fxk-table tbody td:last-child { padding-right: 16px; }
+.fxk-table tbody tr:last-child td { border-bottom: 0; }
+.fxk-table tbody tr { cursor: pointer; }
+.fxk-table tbody tr:hover td { background: var(--fxk-hover); }
+.fxk-table tbody tr:focus-within td { background: color-mix(in srgb, var(--fxk-link) 6%, transparent); }
+.fxk-td-seq { font-family: var(--fxk-mono); font-size: 10.5px; line-height: 16px; letter-spacing: .02em; color: var(--fxk-text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fxk-td-task { overflow: hidden; }
+.fxk-task { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fxk-title {
+  flex: 0 1 auto; min-width: 0; max-width: 100%;
+  padding: 0; border: 0; border-radius: 4px; background: transparent;
+  font-size: 13.5px; line-height: 19px; font-weight: 560; color: var(--fxk-text);
+  text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: pointer;
+}
+.fxk-title:focus-visible { outline-offset: 1px; }
+.fxk-att { flex: none; font-size: 11px; line-height: 16px; color: var(--fxk-text-3); white-space: nowrap; }
+.fxk-td-dur { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fxk-dur-text { font-size: 11.5px; line-height: 17px; color: var(--fxk-text-2); }
+.fxk-dur-empty { font-size: 11.5px; color: var(--fxk-text-3); }
+.fxk-td-dur .fxk-timer { justify-content: flex-end; }
+.fxk-td-upd { text-align: right; font-size: 11.5px; line-height: 17px; color: var(--fxk-text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fxk-td-acts { text-align: right; white-space: nowrap; }
+.fxk-acts { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+.fxk-act {
+  height: 26px; padding: 0 8px; border: 0; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  background: transparent; color: var(--fxk-text-2);
+  font-size: 11.5px; line-height: 1; white-space: nowrap; cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+.fxk-act:hover { background: var(--fxk-active); color: var(--fxk-text); }
+.fxk-act[disabled] { opacity: .45; cursor: default; }
+.fxk-act-run { color: var(--fxk-text); }
+.fxk-act-ok { color: var(--fxk-ok-ink); }
+.fxk-act-ok:hover { background: color-mix(in srgb, var(--fxk-ok) 12%, transparent); color: var(--fxk-ok-ink); }
+.fxk-act-icon { width: 26px; padding: 0; font-size: 13px; color: var(--fxk-text-3); }
+.fxk-act-icon:hover { color: var(--fxk-text); }
+.fxk-td-acts .fxk-timer { font-size: 11.5px; }
+.fxk-td-acts .fxk-timer b { font-size: 11.5px; }
+
+/* 状态 pill：状态是普通字段，每行重复出现 */
+.fxk-state {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 8px 0 7px; border-radius: 6px;
+  background: var(--fxk-hover); color: var(--fxk-text-2);
+  font-size: 11.5px; line-height: 1; white-space: nowrap;
+}
+.fxk-state-dot { width: 6px; height: 6px; border-radius: 999px; flex: none; background: var(--fxk-idle); }
+.fxk-state[data-state="running"] { background: color-mix(in srgb, var(--fxk-brand) 8%, transparent); color: var(--fxk-text); }
+.fxk-state[data-state="running"] .fxk-state-dot { background: var(--fxk-brand); }
+.fxk-state[data-state="review"] { background: color-mix(in srgb, var(--fxk-warn) 13%, transparent); color: color-mix(in srgb, var(--fxk-warn) 45%, var(--fxk-text)); }
+.fxk-state[data-state="review"] .fxk-state-dot { background: var(--fxk-warn); }
+.fxk-state[data-state="done"] { background: color-mix(in srgb, var(--fxk-ok) 11%, transparent); color: color-mix(in srgb, var(--fxk-ok) 50%, var(--fxk-text)); }
+.fxk-state[data-state="done"] .fxk-state-dot { background: var(--fxk-ok); }
+
+/* 表尾的整行新建入口：排序后不再代表「下一张卡的位置」，但仍是最顺手的入口 */
+.fxk-addrow {
+  width: 100%; height: 40px; padding: 0 16px;
+  display: flex; align-items: center; gap: 7px;
+  border: 0; border-top: 1px dashed var(--fxk-border);
+  background: transparent; color: var(--fxk-text-2);
+  font-size: 12px; line-height: 1; font-weight: 500; text-align: left;
+  cursor: pointer; transition: background 120ms, color 120ms;
+}
+.fxk-addrow:hover { background: var(--fxk-hover); color: var(--fxk-text); }
+.fxk-tablefoot {
+  flex: none; min-height: 34px; padding: 0 16px;
+  display: flex; align-items: center; gap: 8px;
+  border-top: 1px solid var(--fxk-border-soft);
+  background: color-mix(in srgb, var(--fxk-card) 88%, var(--fxk-surface));
+  font-size: 11.5px; line-height: 16px; color: var(--fxk-text-3);
+  font-variant-numeric: tabular-nums;
+}
+.fxk-foot-short { display: none; }
+.fxk-empty-cell { height: 120px; text-align: center; color: var(--fxk-text-2); font-size: 12.5px; }
+.fxk-skeleton-cell { height: 50px; }
+.fxk-skeleton-bar { display: block; width: 42%; height: 11px; border-radius: 6px; background: color-mix(in srgb, var(--fxk-text) 5%, transparent); animation: fxk-breathe 1.4s ease-in-out infinite; }
+.fxk-mob-dot { display: none; }
+.fxk-mob-timer { display: none; }
+.fxk-sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
 /* ------------------------------------------------------------ status bar */
 .fxk-errorbar {
   flex: none;
-  width: 100%; max-width: 1240px; margin: 0 auto 8px;
+  width: 100%; max-width: 1400px; margin: 0 auto 8px;
   display: flex; align-items: center; gap: 10px;
   padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--fxk-err) 35%, var(--fxk-border));
@@ -547,6 +774,55 @@ window.__ModuleLoader__.load({
   .fxk-sheet { width: 100%; border-left: 0; }
   .fxk-sheet-foot { flex-wrap: wrap; gap: 6px; }
   .fxk-autosave { order: -1; flex: 1 1 100%; margin-right: 0; }
+
+  /* 列表窄屏：只留任务 / 操作；状态收成标题前的色点，更新 / 用时收进表尾提示 */
+  .fxk-listwrap { padding: 0 14px 14px; }
+  .fxk-table th.c-status, .fxk-table th.c-seq, .fxk-table th.c-dur, .fxk-table th.c-upd,
+  .fxk-table td.c-status, .fxk-table td.c-seq, .fxk-table td.c-dur, .fxk-table td.c-upd { display: none; }
+  .fxk-table thead th.c-acts { width: 96px; }
+  .fxk-table thead th.c-task { padding-left: 27px; }
+  .fxk-table tbody td.c-task { padding-left: 12px; }
+  .fxk-table tbody td { height: 52px; }
+  .fxk-table tbody td.c-acts { padding-right: 12px; }
+  .fxk-mob-dot { display: inline-block; width: 7px; height: 7px; border-radius: 999px; flex: none; background: var(--fxk-idle); }
+  .fxk-mob-dot[data-state="running"] { background: var(--fxk-brand); }
+  .fxk-mob-dot[data-state="review"] { background: var(--fxk-warn); }
+  .fxk-mob-dot[data-state="done"] { background: var(--fxk-ok); }
+  .fxk-mob-timer { display: inline-flex; }
+  .fxk-att, .fxk-table .fxk-chip { display: none; }
+  .fxk-tablefoot { padding: 0 12px; }
+  .fxk-foot-full { display: none; }
+  .fxk-foot-short { display: inline; }
+  .fxk-addrow { padding: 0 12px; font-size: 11.5px; }
+}
+
+/* 中等宽度（分屏 / 平板）：保留状态和任务，收起编号 / 用时 / 更新，
+   避免固定列把任务标题挤成一条缝。表尾负责告诉你当前按哪一列排序。 */
+@container (min-width: 701px) and (max-width: 1080px) {
+  .fxk-table th.c-seq, .fxk-table th.c-dur, .fxk-table th.c-upd,
+  .fxk-table td.c-seq, .fxk-table td.c-dur, .fxk-table td.c-upd { display: none; }
+  .fxk-mob-timer { display: inline-flex; }
+  .fxk-foot-full { display: none; }
+  .fxk-foot-short { display: inline; }
+}
+
+/* 手机上先把标题行收紧一档，保住「看板 / 列表」两个文字标签 */
+@container (max-width: 430px) {
+  .fxk-head { gap: 6px; }
+  .fxk-viewswitch { margin-left: 2px; }
+  .fxk-viewswitch button { padding: 0 8px; }
+  /* 保住「看板 / 列表」两个标签：顶部新建收成 +（表尾那条带文字的新建还在） */
+  .fxk-head .fxk-btn { width: 30px; padding: 0; }
+  .fxk-new-label { display: none; }
+}
+
+/* 再窄就只留图标，aria-label / title 还在 */
+@container (max-width: 360px) {
+  .fxk-viewswitch-label {
+    position: absolute; width: 1px; height: 1px;
+    margin: -1px; padding: 0; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap; border: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -656,6 +932,42 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** 列表视图图标：三条带点的行，和看板的竖条图标是一对。 */
+    function IconList(props) {
+      const size = props && Number(props.size) > 0 ? Number(props.size) : 18
+      return h(
+        'svg',
+        {
+          width: size,
+          height: size,
+          viewBox: '0 0 20 20',
+          fill: 'none',
+          'aria-hidden': true,
+          style: { display: 'block' },
+        },
+        [4.3, 10, 15.7].map((y, index) =>
+          h(
+            'g',
+            { key: index },
+            h('circle', { cx: 3.3, cy: y, r: 1.05, fill: 'currentColor' }),
+            h('rect', { x: 6.4, y: y - 0.7, width: 10.4, height: 1.4, rx: 0.7, fill: 'currentColor' }),
+          ),
+        ),
+      )
+    }
+
+    /** 表头排序箭头：未排序列是淡的双向箭头，当前列只亮其中一边。 */
+    function IconSort(props) {
+      const active = Boolean(props && props.active)
+      const dir = props && props.dir === 'asc' ? 'asc' : 'desc'
+      return h(
+        'svg',
+        { width: 10, height: 14, viewBox: '0 0 10 14', fill: 'none', 'aria-hidden': true, className: 'fxk-sort' },
+        h('path', { d: 'M5 1.4 7.7 4.8H2.3L5 1.4Z', fill: 'currentColor', opacity: active ? (dir === 'asc' ? 1 : 0.18) : 0.5 }),
+        h('path', { d: 'M5 12.6 2.3 9.2h5.4L5 12.6Z', fill: 'currentColor', opacity: active ? (dir === 'desc' ? 1 : 0.18) : 0.5 }),
+      )
+    }
+
     /** 循环箭头（Lucide rotate-cw，24 网格）：标题旁那个「立刻重读一次」的小按钮。 */
     function IconRefresh(props) {
       const size = props && Number(props.size) > 0 ? Number(props.size) : 16
@@ -672,15 +984,15 @@ window.__ModuleLoader__.load({
         h('path', {
           d: 'M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8',
           stroke: 'currentColor',
-          'stroke-width': 2,
-          'stroke-linecap': 'round',
+          strokeWidth: 2,
+          strokeLinecap: 'round',
         }),
         h('path', {
           d: 'M21 3v5h-5',
           stroke: 'currentColor',
-          'stroke-width': 2,
-          'stroke-linecap': 'round',
-          'stroke-linejoin': 'round',
+          strokeWidth: 2,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
         }),
       )
     }
@@ -720,6 +1032,47 @@ window.__ModuleLoader__.load({
       } catch {
         return ''
       }
+    }
+
+    /** 列表「更新」列：今天 / 昨天给时刻，更早给月日；跨年补年份。 */
+    function formatWhen(ms) {
+      const value = Number(ms)
+      if (!Number.isFinite(value) || value <= 0) return '—'
+      const now = new Date()
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+      const date = new Date(value)
+      const clock = clockOf(value)
+      if (value >= start) return t(`今天 ${clock}`, `Today ${clock}`)
+      if (value >= start - 86400000) return t(`昨天 ${clock}`, `Yesterday ${clock}`)
+      const stamp = `${date.getMonth() + 1}/${date.getDate()} ${clock}`
+      return date.getFullYear() === now.getFullYear() ? stamp : `${date.getFullYear()}/${stamp}`
+    }
+
+    /**
+     * 列表的用时：进行中算当前这一轮，其余用上一次跑完的用时。
+     * 排序和展示共用，避免「按用时排序」和看到的数字对不上。
+     */
+    function durationOf(card, now, skew) {
+      if (card.status === 'running' && card.runningSince) return Math.max(0, now - skew - card.runningSince)
+      return Number(card.lastRunMs) || 0
+    }
+
+    function compareListCards(left, right, sort, now, skew) {
+      let primary = 0
+      if (sort.key === 'status') primary = (STATUS_RANK[left.status] ?? 99) - (STATUS_RANK[right.status] ?? 99)
+      else if (sort.key === 'seq') primary = (Number(left.seq) || 0) - (Number(right.seq) || 0)
+      else if (sort.key === 'duration') primary = durationOf(left, now, skew) - durationOf(right, now, skew)
+      else if (sort.key === 'updated') primary = (Number(left.updatedAt) || Number(left.createdAt) || 0) - (Number(right.updatedAt) || Number(right.createdAt) || 0)
+      else if (sort.key === 'title') {
+        try {
+          primary = String(left.title || '').localeCompare(String(right.title || ''), isZh() ? 'zh-Hans-CN' : 'en', { numeric: true, sensitivity: 'base' })
+        } catch {
+          primary = String(left.title || '').localeCompare(String(right.title || ''))
+        }
+      }
+      // 同值永远按编号升序兜底：排序稳定，同状态内也保持创建顺序。
+      if (primary === 0) return (Number(left.seq) || 0) - (Number(right.seq) || 0)
+      return sort.dir === 'desc' ? -primary : primary
     }
 
     function formatBytes(bytes) {
@@ -833,6 +1186,8 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState('')
       const [pickedWorkspaceId, setPickedWorkspaceId] = useState(readViewWorkspace)
       const [narrowCol, setNarrowCol] = useState('todo')
+      const [view, setView] = useState(readViewMode)
+      const [sort, setSort] = useState(readSortState)
       const [modal, setModal] = useState(null)
       const [busy, setBusy] = useState('')
       const [toast, setToast] = useState(null)
@@ -999,6 +1354,28 @@ window.__ModuleLoader__.load({
         persistViewWorkspace(next)
       }, [])
 
+      /** 看板 / 列表：只换内容区，头部和工作区选择保持不变。 */
+      const selectView = useCallback((next) => {
+        if (!VIEW_MODES.includes(next)) return
+        setView(next)
+        persistViewMode(next)
+      }, [])
+
+      /** 表头点击：没在排序的列用它的自然方向，当前列再点一次翻转。 */
+      const toggleSort = useCallback(
+        (key) => {
+          const column = LIST_COLUMNS.find((item) => item.key === key && item.sortable)
+          if (!column) return
+          const next =
+            sort.key === key
+              ? { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
+              : { key, dir: column.dir }
+          setSort(next)
+          persistSortState(next)
+        },
+        [sort],
+      )
+
       /** 卡片落库到别的工作区时把视图跟过去，避免「新建完却看不见」。 */
       const handleSaved = useCallback(
         (saved) => {
@@ -1129,6 +1506,13 @@ window.__ModuleLoader__.load({
           done: byColumn.done.length,
         }),
         [byColumn],
+      )
+
+      // 列表是平铺的：工作区过滤后整体排序，不再按状态分组。
+      // 进行中按用时排序时，now 每秒会推着行微调；其余排序不受影响（值没变）。
+      const sortedCards = useMemo(
+        () => [...visibleCards].sort((left, right) => compareListCards(left, right, sort, now, skewRef.current)),
+        [visibleCards, sort, now],
       )
 
       const elapsedOf = (card) => {
@@ -1367,6 +1751,231 @@ window.__ModuleLoader__.load({
         )
       }
 
+      // ---------------------------------------------------------------- list
+      const renderListHeadCell = (column) => {
+        const active = sort.key === column.key
+        const className = `fxk-thcell ${column.cls}${column.align === 'right' ? ' is-right' : ''}`
+        if (!column.sortable) {
+          return h('th', { key: column.key, scope: 'col', className }, t(column.zh, column.en))
+        }
+        return h(
+          'th',
+          {
+            key: column.key,
+            scope: 'col',
+            className,
+            'aria-sort': active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none',
+          },
+          h(
+            'button',
+            {
+              type: 'button',
+              className: `fxk-thbtn${column.align === 'right' ? ' is-right' : ''}`,
+              'data-active': String(active),
+              title: t(`按${column.zh}排序`, `Sort by ${column.en}`),
+              onClick: () => toggleSort(column.key),
+            },
+            h('span', null, t(column.zh, column.en)),
+            h(IconSort, { active, dir: active ? sort.dir : column.dir }),
+          ),
+        )
+      }
+
+      const renderListRow = (card) => {
+        const state = card.status
+        const attachmentCount = (card.attachments || []).length
+        const updatedAt = Number(card.updatedAt) || Number(card.createdAt) || 0
+        const elapsed = elapsedOf(card)
+        const duration =
+          state === 'running'
+            ? h('span', { className: 'fxk-timer' }, h('span', { className: 'fxk-pulse' }), h('b', null, formatElapsed(elapsed)))
+            : Number(card.lastRunMs) > 0
+              ? h('span', { className: 'fxk-dur-text' }, formatDuration(card.lastRunMs))
+              : h('span', { className: 'fxk-dur-empty' }, '—')
+
+        const actions = []
+        const rerun = h(
+          'button',
+          {
+            key: 'rerun',
+            type: 'button',
+            className: 'fxk-act fxk-act-icon',
+            title: t('重新执行', 'Run again'),
+            'aria-label': t(`重新执行 ${card.title}`, `Run ${card.title} again`),
+            disabled: busy === `run:${card.id}`,
+            onClick: () => void runCard(card),
+          },
+          '↻',
+        )
+        if (state === 'todo') {
+          actions.push(
+            h(
+              'button',
+              {
+                key: 'run',
+                type: 'button',
+                className: 'fxk-act fxk-act-run',
+                title: t('执行这张卡片', 'Run this card'),
+                disabled: busy === `run:${card.id}`,
+                onClick: () => void runCard(card),
+              },
+              '▶ ',
+              t('执行', 'Run'),
+            ),
+          )
+        } else if (state === 'review') {
+          if (card.sessionArchived) actions.push(rerun)
+          actions.push(
+            h(
+              'button',
+              {
+                key: 'done',
+                type: 'button',
+                className: 'fxk-act fxk-act-ok',
+                title: t('标记为已完成，移入已完成', 'Mark as done'),
+                disabled: busy === `done:${card.id}`,
+                onClick: () => void markDone(card),
+              },
+              '✓ ',
+              t('完成', 'Done'),
+            ),
+          )
+        } else if (state === 'done') {
+          if (card.sessionArchived) actions.push(rerun)
+          actions.push(
+            h(
+              'button',
+              {
+                key: 'undone',
+                type: 'button',
+                className: 'fxk-act',
+                title: t('撤销完成，回到待审核', 'Undo done — back to review'),
+                disabled: busy === `undone:${card.id}`,
+                onClick: () => void markUndone(card),
+              },
+              '↩ ',
+              t('撤销', 'Undo'),
+            ),
+          )
+        }
+
+        return h(
+          'tr',
+          {
+            key: card.id,
+            className: 'fxk-table-row',
+            'data-state': state,
+            onClick: () => openCard(card),
+          },
+          h(
+            'td',
+            { className: 'fxk-td fxk-td-status c-status' },
+            h(
+              'span',
+              { className: 'fxk-state', 'data-state': state },
+              h('span', { className: 'fxk-state-dot', 'aria-hidden': 'true' }),
+              h('span', null, statusLabelOf(state)),
+            ),
+          ),
+          h('td', { className: 'fxk-td fxk-td-seq c-seq' }, cardSeqLabel(card) || '—'),
+          h(
+            'td',
+            { className: 'fxk-td fxk-td-task c-task' },
+            h(
+              'div',
+              { className: 'fxk-task' },
+              // 窄屏状态列收起，用标题前的色点代替；宽屏这个点 display:none
+              h('span', { className: 'fxk-mob-dot', 'data-state': state, role: 'img', 'aria-label': statusLabelOf(state) }),
+              h('button', { type: 'button', className: 'fxk-title', title: card.title }, card.title),
+              attachmentCount
+                ? h('span', { className: 'fxk-att', title: t('附件', 'Attachments') }, `📎 ${attachmentCount}`)
+                : null,
+              card.error ? h('span', { className: 'fxk-chip fxk-chip-err', title: card.error }, t('有报错', 'Error')) : null,
+              card.sessionArchived
+                ? h('span', { className: 'fxk-chip fxk-chip-warn', title: t('会话已归档，可点右侧重新执行', 'Conversation archived — run again on the right') }, t('已归档', 'Archived'))
+                : null,
+              card.workspaceId && !workspaceTitle(card.workspaceId)
+                ? h('span', { className: 'fxk-chip fxk-chip-warn' }, t('工作区不可用', 'Workspace missing'))
+                : null,
+            ),
+          ),
+          h('td', { className: 'fxk-td fxk-td-dur c-dur' }, duration),
+          h('td', { className: 'fxk-td fxk-td-upd c-upd' }, formatWhen(updatedAt)),
+          h(
+            'td',
+            { className: 'fxk-td fxk-td-acts c-acts', onClick: (event) => event.stopPropagation() },
+            state === 'running'
+              ? h(
+                  'span',
+                  { className: 'fxk-timer fxk-mob-timer' },
+                  h('span', { className: 'fxk-pulse' }),
+                  h('b', null, formatElapsed(elapsed)),
+                )
+              : null,
+            h('div', { className: 'fxk-acts' }, actions),
+          ),
+        )
+      }
+
+      const renderListTable = () => {
+        const total = visibleCards.length
+        const open = total - totals.done
+        const sortColumn = LIST_COLUMNS.find((item) => item.key === sort.key) || LIST_COLUMNS[0]
+        const sortName = t(sortColumn.zh, sortColumn.en)
+        const arrow = sort.dir === 'asc' ? '↑' : '↓'
+        const footFull = isZh()
+          ? `共 ${total} 张 · 待办 ${totals.todo} · 进行中 ${totals.running} · 待审核 ${totals.review} · 已完成 ${totals.done}`
+          : `${total} cards · ${totals.todo} to do · ${totals.running} running · ${totals.review} review · ${totals.done} done`
+        const footShort = isZh()
+          ? `按${sortName} ${arrow} · 共 ${total} 张 · 未完成 ${open}`
+          : `By ${sortName} ${arrow} · ${total} cards · ${open} open`
+
+        return h(
+          'div',
+          { className: 'fxk-listwrap' },
+          h(
+            'section',
+            { className: 'fxk-tablepanel' },
+            h(
+              'div',
+              { className: 'fxk-tablescroll' },
+              h(
+                'table',
+                { className: 'fxk-table' },
+                h('caption', { className: 'fxk-sr-only' }, t('任务列表', 'Task list')),
+                h('thead', null, h('tr', null, LIST_COLUMNS.map(renderListHeadCell))),
+                h(
+                  'tbody',
+                  null,
+                  loading && !board
+                    ? Array.from({ length: 5 }).map((_, index) =>
+                        h(
+                          'tr',
+                          { key: `skeleton-${index}` },
+                          h('td', { colSpan: LIST_COLUMNS.length, className: 'fxk-skeleton-cell' }, h('span', { className: 'fxk-skeleton-bar' })),
+                        ),
+                      )
+                    : sortedCards.length === 0
+                      ? h(
+                          'tr',
+                          null,
+                          h('td', { colSpan: LIST_COLUMNS.length, className: 'fxk-empty-cell' }, t('这个工作区还没有卡片。', 'No cards in this workspace yet.')),
+                        )
+                      : sortedCards.map(renderListRow),
+                ),
+              ),
+              h('button', { type: 'button', className: 'fxk-addrow', onClick: openCreate }, '＋ ', t('新建待办', 'New card')),
+            ),
+            h(
+              'footer',
+              { className: 'fxk-tablefoot' },
+              h('span', { className: 'fxk-foot-full' }, footFull),
+              h('span', { className: 'fxk-foot-short' }, footShort),
+            ),
+          ),
+        )
+      }
+
       // 看板视图 = 一个工作区。异常抽屉只在真的存在这类卡片时出现，平时完全看不到。
       const filterOptions = [
         ...workspaces.map((workspace) => ({ value: workspace.id, label: workspace.title })),
@@ -1380,7 +1989,7 @@ window.__ModuleLoader__.load({
 
       return h(
         'div',
-        { className: 'fxk-root', 'data-narrow': narrowCol },
+        { className: 'fxk-root', 'data-narrow': narrowCol, 'data-view': view },
         h(
           'header',
           { className: 'fxk-head' },
@@ -1401,6 +2010,36 @@ window.__ModuleLoader__.load({
                 onClick: () => void load(),
               },
               h(IconRefresh, { size: 15 }),
+            ),
+            h(
+              'div',
+              { className: 'fxk-viewswitch', role: 'group', 'aria-label': t('视图', 'View') },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  'data-active': String(view === 'board'),
+                  'aria-pressed': view === 'board',
+                  'aria-label': t('看板视图', 'Board view'),
+                  title: t('看板视图', 'Board view'),
+                  onClick: () => selectView('board'),
+                },
+                h(IconKanban, { size: 14, active: view === 'board' }),
+                h('span', { className: 'fxk-viewswitch-label' }, t('看板', 'Board')),
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  'data-active': String(view === 'list'),
+                  'aria-pressed': view === 'list',
+                  'aria-label': t('列表视图', 'List view'),
+                  title: t('列表视图', 'List view'),
+                  onClick: () => selectView('list'),
+                },
+                h(IconList, { size: 14 }),
+                h('span', { className: 'fxk-viewswitch-label' }, t('列表', 'List')),
+              ),
             ),
           ),
           h('span', { className: 'fxk-head-spacer' }),
@@ -1430,28 +2069,30 @@ window.__ModuleLoader__.load({
               'aria-label': t('新建待办', 'New card'),
               onClick: openCreate,
             },
-            '+ ',
-            t('新建待办', 'New card'),
+            h('span', { className: 'fxk-new-plus' }, '+'),
+            h('span', { className: 'fxk-new-label' }, t('新建待办', 'New card')),
           ),
         ),
-        h(
-          'div',
-          { className: 'fxk-tabs' },
-          COLUMNS.map((column) =>
-            h(
-              'button',
-              {
-                key: column.id,
-                type: 'button',
-                className: 'fxk-tab',
-                'data-active': String(narrowCol === column.id),
-                onClick: () => setNarrowCol(column.id),
-              },
-              isZh() ? column.zh : column.en,
-              h('span', { className: 'fxk-col-count' }, String(totals[column.id] || 0)),
-            ),
-          ),
-        ),
+        view === 'board'
+          ? h(
+              'div',
+              { className: 'fxk-tabs' },
+              COLUMNS.map((column) =>
+                h(
+                  'button',
+                  {
+                    key: column.id,
+                    type: 'button',
+                    className: 'fxk-tab',
+                    'data-active': String(narrowCol === column.id),
+                    onClick: () => setNarrowCol(column.id),
+                  },
+                  isZh() ? column.zh : column.en,
+                  h('span', { className: 'fxk-col-count' }, String(totals[column.id] || 0)),
+                ),
+              ),
+            )
+          : null,
         error
           ? h(
               'div',
@@ -1464,7 +2105,7 @@ window.__ModuleLoader__.load({
               ),
             )
           : null,
-        h('div', { className: 'fxk-board' }, COLUMNS.map(renderColumn)),
+        view === 'list' ? renderListTable() : h('div', { className: 'fxk-board' }, COLUMNS.map(renderColumn)),
         modal
           ? h(Editor, {
               key: modal.card ? modal.card.id : 'new',
