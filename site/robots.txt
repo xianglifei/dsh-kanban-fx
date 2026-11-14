@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /og.html
+
+Sitemap: https://xianglifei.github.io/dsh-kanban-fx/sitemap.xml

@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>任务看板 · 点执行就开跑 — DeepSeek Harness 插件</title>
+<meta name="description" content="给 DeepSeek Harness 做的任务看板插件：待办、进行中、待审核、已完成四列跟着会话走。点「执行」直接在那个工作区开会话并开跑，不经过新建会话页。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f4f4f1">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="任务看板 · dsh-kanban-fx">
+<meta property="og:title" content="任务看板 · 点执行就开跑">
+<meta property="og:description" content="给 DeepSeek Harness 的看板插件：想法进看板，点执行直接开会话开跑，状态跟着会话走。">
+<meta property="og:url" content="https://xianglifei.github.io/dsh-kanban-fx/">
+<meta property="og:image" content="https://xianglifei.github.io/dsh-kanban-fx/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="任务看板 · 点执行就开跑">
+<meta name="twitter:description" content="给 DeepSeek Harness 的看板插件：想法进看板，点执行直接开会话开跑。">
+<meta name="twitter:image" content="https://xianglifei.github.io/dsh-kanban-fx/assets/og.png">
+<link rel="canonical" href="https://xianglifei.github.io/dsh-kanban-fx/">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="preload" href="assets/img/board-light.webp" as="image" type="image/webp">
+<link rel="stylesheet" href="assets/css/site.css">
+<script>
+  // Set the theme before first paint so there is no flash.
+  (function () {
+    try {
+      var saved = localStorage.getItem('kb-theme');
+      var theme = saved === 'light' || saved === 'dark'
+        ? saved
+        : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.dataset.theme = theme;
+      document.documentElement.classList.add('js');
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', theme === 'dark' ? '#0f1011' : '#f4f4f1');
+    } catch (e) {}
+  })();
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "任务看板 · dsh-kanban-fx",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS, Linux, Windows",
+  "softwareVersion": "0.5.0",
+  "description": "DeepSeek Harness 的任务看板插件：四列跟着会话走，点执行直接开会话开跑。",
+  "url": "https://xianglifei.github.io/dsh-kanban-fx/",
+  "downloadUrl": "https://github.com/xianglifei/dsh-kanban-fx",
+  "codeRepository": "https://github.com/xianglifei/dsh-kanban-fx",
+  "license": "https://github.com/xianglifei/dsh-kanban-fx/blob/main/LICENSE",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" },
+  "author": { "@type": "Person", "name": "xianglifei", "url": "https://github.com/xianglifei" }
+}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">跳到正文</a>
+
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-arrow" viewBox="0 0 20 20"><path d="M4 10h11M11 5.5 15.5 10 11 14.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.35 1.09 2.92.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.94.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="7" y="7" width="9" height="10" rx="2.5"/><path d="M13 7V5.5A2.5 2.5 0 0 0 10.5 3h-5A2.5 2.5 0 0 0 3 5.5v7A2.5 2.5 0 0 0 5.5 15H7"/></g></symbol>
+  <symbol id="i-check" viewBox="0 0 20 20"><path d="m4.5 10.5 3.5 3.5 7.5-8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"/></g></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="i-external" viewBox="0 0 20 20"><path d="M8 4H4.5A1.5 1.5 0 0 0 3 5.5v10A1.5 1.5 0 0 0 4.5 17h10a1.5 1.5 0 0 0 1.5-1.5V12M11 3h6v6M17 3 8.5 11.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 20 20"><path d="M11.5 2 4 11h5l-.8 7L16 9h-5l.5-7Z" fill="currentColor"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 20 20"><path d="M10 2.5c.5 3.9 2.6 6 6.5 6.5-3.9.5-6 2.6-6.5 6.5-.5-3.9-2.6-6-6.5-6.5 3.9-.5 6-2.6 6.5-6.5Z" fill="currentColor"/></symbol>
+</svg>
+
+<header class="site-header" id="top">
+  <div class="wrap header-inner">
+    <a class="brand" href="#top" aria-label="任务看板 · 回到顶部">
+      <img src="assets/icon.svg" width="30" height="30" alt="" class="brand-mark">
+      <span class="brand-text"><strong>任务看板</strong><span class="brand-sub">dsh-kanban-fx</span></span>
+    </a>
+    <nav class="nav" id="nav" aria-label="主导航">
+      <a href="#why">为什么</a>
+      <a href="#flow">流程</a>
+      <a href="#ui">界面</a>
+      <a href="#features">细节</a>
+      <a href="#install">安装</a>
+      <a href="#faq">问答</a>
+    </nav>
+    <div class="header-actions">
+      <button class="icon-btn theme-toggle" id="themeToggle" type="button" aria-label="切换到深色模式" title="切换深浅色">
+        <svg class="ic ic-sun" aria-hidden="true"><use href="#i-sun"/></svg>
+        <svg class="ic ic-moon" aria-hidden="true"><use href="#i-moon"/></svg>
+      </button>
+      <a class="gh-btn" href="https://github.com/xianglifei/dsh-kanban-fx" target="_blank" rel="noreferrer">
+        <svg class="ic" aria-hidden="true"><use href="#i-github"/></svg><span>GitHub</span>
+      </a>
+      <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="打开菜单" aria-expanded="false" aria-controls="nav">
+        <svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="header-progress" id="progress" aria-hidden="true"></div>
+</header>
+
+<main id="main">
+  <!-- 01 · hero -->
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-dots" aria-hidden="true"></div>
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span>DSH Web 插件 · v0.5.0</p>
+        <h1 id="hero-title">想法进看板，<br><span class="hl">点执行就开跑。</span></h1>
+        <p class="lead">给 DeepSeek Harness 做的任务看板：待办、进行中、待审核、已完成四列跟着会话走。点卡片上的「执行」，插件直接在那个工作区建会话、把卡片内容投进去并立刻开跑——不经过新建会话页。</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#install">开始安装<svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+          <a class="btn btn-ghost" href="#ui">看看界面</a>
+          <a class="text-link" href="https://github.com/xianglifei/dsh-kanban-fx" target="_blank" rel="noreferrer">源码与文档<svg class="ic" aria-hidden="true"><use href="#i-external"/></svg></a>
+        </div>
+        <ul class="hero-meta" aria-label="项目信息">
+          <li>MIT 许可</li>
+          <li>无构建步骤</li>
+          <li>深浅色自适应</li>
+          <li>窄屏可用</li>
+        </ul>
+      </div>
+
+      <div class="hero-art" role="img" aria-label="任务看板界面示意：四列卡片、进行中计时与已完成折叠">
+        <div class="stage" id="heroStage" aria-hidden="true">
+          <div class="stage-glow" aria-hidden="true"></div>
+          <div class="board-window" id="heroBoard">
+            <div class="window-bar">
+              <div class="window-left">
+                <img src="assets/icon.svg" width="18" height="18" alt="">
+                <span class="window-title">任务看板</span>
+                <div class="window-tabs" aria-hidden="true"><span class="on">▦ 看板</span><span>☰ 列表</span></div>
+              </div>
+              <div class="window-right" aria-hidden="true">
+                <span class="ws-select">工作区 <b>dsh-kanban-fx</b><span class="caret">⌄</span></span>
+                <span class="mini-cta">＋ 新建待办</span>
+              </div>
+            </div>
+            <div class="mini-board">
+              <div class="mini-col">
+                <div class="mini-head"><span class="status-dot todo"></span>待办<span class="mini-count">2</span></div>
+                <article class="mini-card">
+                  <h3>给列表补多选与批量完成</h3>
+                  <p>勾选多行后一起完成 / 撤销，表头补一个全选框。</p>
+                  <span class="mini-tag">看板插件</span>
+                  <div class="mini-foot"><span>还没开始</span><span class="mini-run">▶ 执行</span></div>
+                </article>
+                <article class="mini-card">
+                  <h3>导出当前排序为 Markdown</h3>
+                  <p>带状态、编号、更新时间和所属工作区。</p>
+                  <span class="mini-tag">看板插件</span>
+                  <div class="mini-foot"><span>还没开始</span><span class="mini-run">▶ 执行</span></div>
+                </article>
+                <div class="mini-new">＋ 新建待办</div>
+              </div>
+
+              <div class="mini-col">
+                <div class="mini-head"><span class="status-dot running"></span>进行中<span class="mini-count">1</span></div>
+                <article class="mini-card is-running">
+                  <h3>给设置页补键盘导航</h3>
+                  <p>Tab 顺序走完选项、输入框和保存；Esc 返回看板。</p>
+                  <span class="mini-tag">看板插件</span>
+                  <div class="mini-foot mini-foot-timer"><span class="timer"><span class="pulse-dot"></span>03:07</span><span>运行中</span></div>
+                </article>
+              </div>
+
+              <div class="mini-col">
+                <div class="mini-head"><span class="status-dot review"></span>待审核<span class="mini-count">1</span></div>
+                <article class="mini-card">
+                  <h3>修自动保存第二次起的 409</h3>
+                  <p>连点保存时用 draft key 去重，别再发第二次。</p>
+                  <span class="mini-tag">看板插件</span>
+                  <div class="mini-foot"><span>用时 5 分 0 秒</span><span class="mini-done">✓ 完成</span></div>
+                </article>
+              </div>
+
+              <div class="mini-col">
+                <div class="mini-head"><span class="status-dot done"></span>已完成<span class="mini-count">2</span></div>
+                <div class="mini-collapsed">› 把「新建待办」挪回待办列</div>
+                <div class="mini-collapsed">› 给 SSE 加心跳</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="float-pill float-pill-run" aria-hidden="true">
+            <span class="float-ico"><svg class="ic"><use href="#i-bolt"/></svg></span>
+            <span><b>会话已开跑</b><small>工作区 · dsh-kanban-fx</small></span>
+          </div>
+          <div class="float-pill float-pill-done" aria-hidden="true">
+            <span class="float-check"><svg class="ic"><use href="#i-check"/></svg></span>
+            <span><b>已移入已完成</b><small>可以撤销</small></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <ul class="hero-stats" aria-label="关键数字">
+        <li><b>4</b><span>列流程</span></li>
+        <li><b>2</b><span>种视图</span></li>
+        <li><b>0</b><span>构建步骤</span></li>
+        <li><b>100%</b><span>数据在本机</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 02 · why -->
+  <section class="section" id="why" aria-labelledby="why-title">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="kicker"><span>01</span>为什么是看板</p>
+        <h2 id="why-title">别让「先开个会话」<br>打断正在想的事。</h2>
+        <p class="section-lead">想法往往只完整三秒。看板把「记下来」和「开始做」拆成两步，又把两步接在同一条线上：卡片存住想法，点执行就把想法原样送进会话。</p>
+      </div>
+
+      <div class="why-grid">
+        <article class="why-card reveal">
+          <span class="why-no">01</span>
+          <div class="why-icon"><svg class="ic" aria-hidden="true"><use href="#i-bolt"/></svg></div>
+          <h3>不复制，不粘贴</h3>
+          <p>卡片内容就是首条消息：手写标题作为第一行，正文原样跟在后面。工作区在新建时已经选好，执行时不用再找一遍。</p>
+          <div class="why-foot"><span class="mono">▶ 执行</span><span class="arrow-mini">→</span><span class="mono muted">新会话开跑</span></div>
+        </article>
+        <article class="why-card reveal">
+          <div class="why-no">02</div>
+          <div class="why-icon"><svg class="ic" aria-hidden="true"><use href="#i-spark"/></svg></div>
+          <h3>状态不用手搬</h3>
+          <p>会话跑完进待审核；你回去继续说话又回到进行中；满意就点完成。四列是会话状态的倒影，不是另一份要维护的清单。</p>
+          <div class="why-foot status-track" aria-hidden="true">
+            <span class="t-dot todo"></span><i></i><span class="t-dot running"></span><i></i><span class="t-dot review"></span><i></i><span class="t-dot done"></span>
+          </div>
+        </article>
+        <article class="why-card reveal">
+          <div class="why-no">03</div>
+          <div class="why-icon"><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg></div>
+          <h3>完成还能再加一轮</h3>
+          <p>设置里写一条收尾提示词，点完成后先发进这张卡片的会话；这一轮正常结束才自动完成，报错或中止就退回待审核，不猜成功。</p>
+          <div class="why-foot"><span class="pill pill-finish"><span class="pulse-dot"></span>00:42 收尾中</span><span class="muted small">正常结束 → 已完成</span></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- 03 · flow -->
+  <section class="section section-tint" id="flow" aria-labelledby="flow-title">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="kicker"><span>02</span>一条卡的旅程</p>
+        <h2 id="flow-title">从一句想法，<br>到一次可回看的完成。</h2>
+      </div>
+      <ol class="flow" aria-label="卡片状态流程">
+        <li class="flow-step reveal">
+          <div class="flow-top"><span class="flow-no">01</span><span class="status-dot todo"></span></div>
+          <h3>记下想法</h3>
+          <p>标题、正文、附件、所属工作区。新建卡片会先自动存成草稿，编号 <span class="mono">fx-12</span> 点一下即可复制。</p>
+          <span class="flow-flag">待办</span>
+        </li>
+        <li class="flow-step reveal">
+          <div class="flow-top"><span class="flow-no">02</span><span class="status-dot running"></span></div>
+          <h3>点执行</h3>
+          <p>插件在那个工作区建会话，把卡片内容投成首条消息并立刻开跑；面板直接跳到会话，你可以马上补话。</p>
+          <span class="flow-flag">进行中</span>
+        </li>
+        <li class="flow-step reveal">
+          <div class="flow-top"><span class="flow-no">03</span><span class="status-dot review"></span></div>
+          <h3>回看结果</h3>
+          <p>一轮结束自动落回待审核，并带上这一轮用时。点开进普通会话页看结果，继续说话就回到进行中。</p>
+          <span class="flow-flag">待审核</span>
+        </li>
+        <li class="flow-step reveal">
+          <div class="flow-top"><span class="flow-no">04</span><span class="status-dot done"></span></div>
+          <h3>点完成</h3>
+          <p>在看板、列表或会话标题栏点「完成」都行。默认立即移入已完成并可撤销；开了收尾提示词就先跑最后一轮。</p>
+          <span class="flow-flag">已完成</span>
+        </li>
+      </ol>
+      <p class="flow-note reveal"><span class="mono">收尾中</span> 不是第五种状态：它仍算进行中，列、排序、筛选、计数都不变，只是文案和圆点换成收尾。窄屏下四列会收成「状态分段 + 单列」，流程顺序不变。</p>
+    </div>
+  </section>
+
+  <!-- 04 · ui gallery -->
+  <section class="section" id="ui" aria-labelledby="ui-title">
+    <div class="wrap">
+      <div class="section-head section-head-row reveal">
+        <div>
+          <p class="kicker"><span>03</span>界面</p>
+          <h2 id="ui-title">点阵画布上，<br>四张浮起来的卡。</h2>
+        </div>
+        <p class="section-lead side-note">颜色全部走 DSH 的 <span class="mono">--dsw-alias-*</span> token，深浅色跟着站点主题一起换。点图可以放大。</p>
+      </div>
+
+      <div class="gallery reveal" id="gallery">
+        <div class="gallery-bar">
+          <div class="gallery-tabs" role="tablist" aria-label="界面截图">
+            <button type="button" role="tab" id="tab-board" aria-controls="galleryPanel" aria-selected="true" data-tab="board">看板</button>
+            <button type="button" role="tab" id="tab-list" aria-controls="galleryPanel" aria-selected="false" data-tab="list" tabindex="-1">列表</button>
+            <button type="button" role="tab" id="tab-settings" aria-controls="galleryPanel" aria-selected="false" data-tab="settings" tabindex="-1">设置</button>
+            <button type="button" role="tab" id="tab-compose" aria-controls="galleryPanel" aria-selected="false" data-tab="compose" tabindex="-1">新建待办</button>
+          </div>
+          <div class="gallery-hint"><span class="dot-pair" aria-hidden="true"></span>深浅色跟随站点</div>
+        </div>
+        <figure class="gallery-panel" id="galleryPanel" role="tabpanel" aria-labelledby="tab-board">
+          <button class="shot" type="button" data-lightbox aria-label="放大查看界面截图">
+            <img id="galleryImg" src="assets/img/board-light.webp" alt="任务看板：待办、进行中、待审核、已完成四列，每列一张浮起的圆角卡" width="1200" height="764">
+          </button>
+          <figcaption class="gallery-caption">
+            <div><h3 id="galleryTitle">四列看板</h3><p id="galleryDesc">一列一个状态。卡片上直接执行、完成、撤销；已完成默认折成一行标题，一屏放得下更多历史。</p><span class="pan-note" aria-hidden="true">↔ 左右滑动看图 · 点按放大</span></div>
+            <span class="cap-note">自查渲染 · 假数据</span>
+          </figcaption>
+        </figure>
+      </div>
+
+      <div class="ui-notes">
+        <div class="ui-note reveal"><h3>列表不是另一套数据</h3><p>同一批卡片换成平铺表格：状态是行内字段，表头可排序，默认按流程顺序把待办放在最前。视图和排序记在浏览器本地。</p></div>
+        <div class="ui-note reveal"><h3>工作区不是筛选器</h3><p>右上角切换器和侧边栏切工作区等价，一次只看一个；从工作区「…」菜单进来就直接落在那一个上。</p></div>
+        <div class="ui-note reveal"><h3>窄屏是重新排的版</h3><p>700px 以下看板换成状态分段 + 单列，列表只留任务与操作；新建入口一直在，430px 以下收成「＋」。</p></div>
+      </div>
+
+      <div class="mobile-showcase reveal">
+        <div class="mobile-head">
+          <h3>口袋里的那一列</h3>
+          <p>三张窄屏自查图：看板、列表、设置。同一套组件，不是另做的移动端。</p>
+        </div>
+        <p class="phones-hint" aria-hidden="true">← 左右滑动 →</p>
+        <div class="phones">
+          <figure class="phone"><div class="phone-screen"><img src="assets/img/mobile-board.webp" alt="窄屏看板：状态分段控件与单列卡片" loading="lazy" width="430" height="792"></div><figcaption>看板 · 状态分段 + 单列</figcaption></figure>
+          <figure class="phone"><div class="phone-screen"><img src="assets/img/mobile-list.webp" alt="窄屏列表：只保留任务与操作两列" loading="lazy" width="390" height="844"></div><figcaption>列表 · 任务与操作</figcaption></figure>
+          <figure class="phone"><div class="phone-screen"><img src="assets/img/mobile-settings.webp" alt="窄屏设置页：完成之后与高级区域纵向排列" loading="lazy" width="780" height="1688"></div><figcaption>设置 · 纵向滚动</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 · features -->
+  <section class="section section-tint" id="features" aria-labelledby="features-title">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="kicker"><span>04</span>抠过的细节</p>
+        <h2 id="features-title">看起来简单，<br>是因为难的地方<br class="br-m">都藏起来了。</h2>
+        <p class="section-lead">数据新鲜度、收尾兜底、窄屏回流——这些不在截图里，但决定了它能不能天天用。</p>
+      </div>
+
+      <div class="bento">
+        <article class="bento-card span-5 reveal">
+          <div class="bento-copy">
+            <h3>两副面孔，一个看板</h3>
+            <p>看板看流程，列表看全量。切换只换内容区，选过的视图记在浏览器本地，下次进来还是它。</p>
+          </div>
+          <div class="visual visual-views" aria-hidden="true">
+            <div class="seg"><span class="on">▦ 看板</span><span>☰ 列表</span></div>
+            <div class="fake-table">
+              <div class="ft-row ft-head"><span></span><span>任务</span><span>状态</span><span>更新</span></div>
+              <div class="ft-row"><span class="ft-id">fx-12</span><span>给列表补多选</span><span class="ft-pill todo">待办</span><span>今天</span></div>
+              <div class="ft-row"><span class="ft-id">fx-11</span><span>导出 Markdown</span><span class="ft-pill running">进行中</span><span>11:34</span></div>
+              <div class="ft-row"><span class="ft-id">fx-10</span><span>SSE 心跳</span><span class="ft-pill done">已完成</span><span>昨天</span></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="bento-card span-7 reveal">
+          <div class="bento-copy">
+            <h3>从工作区直接跳进来</h3>
+            <p>侧边栏每个工作区的「…」菜单第一项就是「打开任务看板」。点一下切到看板，并把切换器落在<strong>这个</strong>工作区上，不用进去再切一次。右键菜单里也是同一项。</p>
+          </div>
+          <div class="visual visual-menu" aria-hidden="true">
+            <div class="menu-scene">
+              <div class="fake-sidebar">
+                <div class="fs-label">工作区</div>
+                <div class="ws-row is-active"><span class="ws-ico"></span><span class="ws-name">dsh-kanban-fx</span><span class="ws-more">…</span></div>
+                <div class="ws-row"><span class="ws-ico ghost"></span><span class="ws-name">看板插件</span></div>
+                <div class="ws-row"><span class="ws-ico ghost"></span><span class="ws-name">前端页面</span></div>
+              </div>
+              <div class="ws-menu">
+                <div class="ws-item is-focus"><span class="menu-ico">▦</span>打开任务看板<span class="key">↵</span></div>
+                <div class="ws-item"><span class="menu-ico">✎</span>重命名</div>
+                <div class="ws-item"><span class="menu-ico">□</span>在 Finder 中显示</div>
+                <div class="ws-sep"></div>
+                <div class="ws-item danger"><span class="menu-ico">×</span>删除工作区</div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="bento-card span-4 reveal">
+          <div class="bento-copy">
+            <h3>已完成收成一行</h3>
+            <p>默认折成约 32px 高的标题行，点开才展开完整卡片。展开状态只留在当前面板，刷新后回到折叠。</p>
+          </div>
+          <div class="visual visual-collapse" aria-hidden="true">
+            <div class="collapse-head"><span class="status-dot done"></span>已完成<span class="mini-count">3</span></div>
+            <div class="collapse-row is-open">⌄ 补 README 的安装说明</div>
+            <div class="collapse-card">把新增的安装方式、升级提示和 Host 接口一起补进 README。</div>
+            <div class="collapse-row">› 修自动保存第二次起的 409</div>
+            <div class="collapse-row">› 给 SSE 加心跳</div>
+          </div>
+        </article>
+
+        <article class="bento-card span-4 reveal">
+          <div class="bento-copy">
+            <h3>新鲜度不用你操心</h3>
+            <p>顶栏没有刷新按钮。变化推送 + 15 秒兜底轮询 + 回到前台 + 25 秒心跳，四层兜着，读失败才出现「重试」。</p>
+          </div>
+          <div class="visual visual-fresh" aria-hidden="true">
+            <div class="fresh-line"><span class="fresh-dot ok"></span><b>SSE</b><span>变化即推 rev</span><em>已同步</em></div>
+            <div class="fresh-line"><span class="fresh-dot ok"></span><b>轮询</b><span>15s 静默重读</span><em>待命</em></div>
+            <div class="fresh-line"><span class="fresh-dot ok"></span><b>心跳</b><span>25s 一帧 beat</span><em>正常</em></div>
+            <div class="fresh-line"><span class="fresh-dot ok"></span><b>前台</b><span>聚焦 / 可见即读</span><em>监听中</em></div>
+          </div>
+        </article>
+
+        <article class="bento-card span-4 reveal">
+          <div class="bento-copy">
+            <h3>收尾中，也不撒谎</h3>
+            <p>收尾轮正常结束才写完成时间；报错或中止只清标记、退回待审核。Host 重启后同样不猜成功。</p>
+          </div>
+          <div class="visual visual-finish" aria-hidden="true">
+            <div class="finish-card">
+              <b>补一份接口变更说明</b>
+              <div class="finish-meta"><span class="pill pill-finish"><span class="pulse-dot"></span>00:42 收尾中</span><span class="muted small">开始时 12:33</span></div>
+            </div>
+            <div class="finish-next"><span class="ok-ico">✓</span>正常结束 → 自动进已完成</div>
+            <div class="finish-next warn"><span class="warn-ico">!</span>报错 / 中止 → 回待审核</div>
+          </div>
+        </article>
+
+        <article class="bento-card span-7 reveal">
+          <div class="bento-copy">
+            <h3>在会话里也能收尾</h3>
+            <p>普通会话页的标题栏会带上卡片状态和「✓ 完成」。点完成顺手把你看板带回这张卡片所在的工作区；开了收尾提示词就先发消息再回看板。</p>
+          </div>
+          <div class="visual visual-session" aria-hidden="true">
+            <div class="sess-bar">
+              <span class="sess-title">整理会话页的完成按钮</span>
+              <span class="sess-badge">Standard</span>
+              <span class="sess-state"><i class="status-dot review"></i>待审核</span>
+              <span class="sess-done">✓ 完成</span>
+              <span class="sess-more">···</span>
+            </div>
+            <div class="sess-bar">
+              <span class="sess-title">整理会话页的完成按钮</span>
+              <span class="sess-badge">Standard</span>
+              <span class="sess-state"><i class="status-dot running"></i>进行中</span>
+              <span class="sess-more">···</span>
+            </div>
+            <div class="sess-bar">
+              <span class="sess-title">整理会话页的完成按钮</span>
+              <span class="sess-badge">Standard</span>
+              <span class="sess-state"><i class="status-dot done"></i>已完成</span>
+              <span class="sess-more">···</span>
+            </div>
+            <p class="sess-note">会话标题栏 · 同一张卡的三种状态</p>
+          </div>
+        </article>
+
+        <article class="bento-card span-5 reveal">
+          <div class="bento-copy">
+            <h3>可预期的边界</h3>
+            <p>v1 不做拖拽排序、自定义列、看板内直接对话。状态由会话推进决定，少一套需要手动维护的真相。</p>
+          </div>
+          <ul class="boundary-list" aria-label="v1 不做的事">
+            <li><span>✕</span>拖拽排序 / 跨列拖动</li>
+            <li><span>✕</span>自定义列 / 子任务 / 截止日期</li>
+            <li><span>✕</span>「全部工作区」聚合</li>
+            <li><span>✓</span>用状态、排序与折叠保持克制</li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 · install -->
+  <section class="section" id="install" aria-labelledby="install-title">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="kicker"><span>05</span>安装</p>
+        <h2 id="install-title">一条命令，<br>然后侧边栏见。</h2>
+        <p class="section-lead">公开仓库，任意机器都能装。插件只依赖 Node 内置模块和 Host 侧的 <span class="mono">ctx</span> 服务，没有构建步骤。</p>
+      </div>
+
+      <div class="install-grid">
+        <div class="install-main reveal">
+          <ol class="steps">
+            <li>
+              <div class="step-no">1</div>
+              <div class="step-body">
+                <h3>把插件装进 desktop 配置</h3>
+                <div class="terminal">
+                  <div class="terminal-bar"><span class="tl"><i></i><i></i><i></i></span><span class="terminal-title">zsh</span><button class="copy-btn" type="button" data-copy="dsh plugin --profile desktop add github:xianglifei/dsh-kanban-fx" aria-label="复制安装命令"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span aria-live="polite">复制</span></button></div>
+                  <pre><code><span class="t-prompt">$</span> dsh plugin --profile desktop add github:xianglifei/dsh-kanban-fx</code></pre>
+                </div>
+                <p class="step-note">开发时把 <span class="mono">github:…</span> 换成 <span class="mono">link:/path/to/dsh-kanban-fx</span>；也可以在 DSH 的 <b>Plugins → Add plugin</b> 里选目录。</p>
+              </div>
+            </li>
+            <li>
+              <div class="step-no">2</div>
+              <div class="step-body">
+                <h3>从侧边栏或工作区菜单打开</h3>
+                <p>装好后侧边栏出现「任务看板」图标；每个工作区行尾「…」菜单的第一项是「打开任务看板」，直接落到那个工作区。</p>
+              </div>
+            </li>
+            <li>
+              <div class="step-no">3</div>
+              <div class="step-body">
+                <h3>新建一张卡，点执行</h3>
+                <p>内容会投进新会话并立刻开跑。跑完在待审核里看结果，满意就点「完成」；想让它自己收尾，去齿轮里写一条收尾提示词。</p>
+              </div>
+            </li>
+          </ol>
+
+          <aside class="upgrade-note" aria-label="升级提示">
+            <div class="upgrade-ico">!</div>
+            <div>
+              <h3>从 0.4.x 升到 0.5.0？</h3>
+              <p>刷新页面只更新 Client 半。先在 DSH 里把「任务看板」禁用再启用（或重启 DSH），新的 Host <span class="mono">/settings</span> 路由才会加载；看板数据不受影响，重载前把设置页草稿复制出来。</p>
+            </div>
+          </aside>
+        </div>
+
+        <aside class="install-side reveal">
+          <h3>装之前，先知道这些</h3>
+          <ul class="req-list">
+            <li><span class="req-key">运行环境</span><span>DeepSeek Harness <span class="mono">^0.2.2-rc.1</span></span></li>
+            <li><span class="req-key">许可</span><span>MIT · 可自由修改与分发</span></li>
+            <li><span class="req-key">依赖</span><span>仅 Node 内置模块，无构建</span></li>
+            <li><span class="req-key">数据</span><span><span class="mono">~/.dsh/dsh-kanban-fx/board.json</span></span></li>
+            <li><span class="req-key">附件</span><span>走 DSH 自己的附件服务，单卡上限 24 MB</span></li>
+            <li><span class="req-key">卸载</span><span>数据留在磁盘，不会跟着删</span></li>
+          </ul>
+          <div class="side-links">
+            <a class="text-link" href="https://github.com/xianglifei/dsh-kanban-fx#安装" target="_blank" rel="noreferrer">README · 安装<svg class="ic" aria-hidden="true"><use href="#i-external"/></svg></a>
+            <a class="text-link" href="https://github.com/xianglifei/dsh-kanban-fx/blob/main/CHANGELOG.md" target="_blank" rel="noreferrer">CHANGELOG · 变更记录<svg class="ic" aria-hidden="true"><use href="#i-external"/></svg></a>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- 07 · faq -->
+  <section class="section section-tint" id="faq" aria-labelledby="faq-title">
+    <div class="wrap faq-wrap">
+      <div class="section-head reveal">
+        <p class="kicker"><span>06</span>先问一遍</p>
+        <h2 id="faq-title">你可能想问。</h2>
+      </div>
+      <div class="faq reveal">
+        <details open>
+          <summary>数据存在哪里？会上传到别处吗？<span class="faq-plus" aria-hidden="true"></span></summary>
+          <div class="faq-body"><p>看板存在本机 <span class="mono">$DSH_HOME/dsh-kanban-fx/board.json</span>（默认 <span class="mono">~/.dsh/dsh-kanban-fx/board.json</span>）。卡片附件走 DSH 自己的附件服务，和新建会话输入框同一套落盘。插件只和本机 Host 通信，没有把看板上传到别处的逻辑。收尾提示词是明文存储，别放密钥。</p></div>
+        </details>
+        <details>
+          <summary>为什么工作区切换器没有「全部」？<span class="faq-plus" aria-hidden="true"></span></summary>
+          <div class="faq-body"><p>它是工作区切换器，不是筛选器：一次只显示一个工作区，切换成本和在侧边栏切工作区一样。「全部工作区」是 v1 明确不做的范围，为的是让「卡片属于哪个工作区」始终只有一个答案。</p></div>
+        </details>
+        <details>
+          <summary>点「完成」之后，还能再补一句吗？<span class="faq-plus" aria-hidden="true"></span></summary>
+          <div class="faq-body"><p>默认「什么都不做」：点完成立即移入已完成，可以撤销。如果开启「发送一条收尾提示词」，卡片会进入进行中并显示「收尾中」，这一轮正常结束才自动完成；报错或中止回待审核，可以再点一次完成重试。收尾期间又去会话里补话，自动完成会落在下一轮（v1 不区分哪条是收尾消息）。</p></div>
+        </details>
+        <details>
+          <summary>能拖拽排序、自定义列，或者在看板里直接聊天吗？<span class="faq-plus" aria-hidden="true"></span></summary>
+          <div class="faq-body"><p>v1 都不做。看板不想维护第二套手动真相：状态由会话推进决定，排序交给列表视图的表头和看板的流程顺序。自定义列、子任务、截止日期、看板内对话也都不在范围内。</p></div>
+        </details>
+        <details>
+          <summary>怎么升级？<span class="faq-plus" aria-hidden="true"></span></summary>
+          <div class="faq-body"><p>在 DSH 的插件页更新，或重新安装一次。Host（<span class="mono">index.js</span>）有改动时，要在 DSH 里把插件禁用再启用（或重启 DSH）才会加载新代码；只刷新页面只会更新 Client。看板数据不受影响。</p></div>
+        </details>
+        <details>
+          <summary>这是 DeepSeek 官方插件吗？<span class="faq-plus" aria-hidden="true"></span></summary>
+          <div class="faq-body"><p>不是，是社区第三方插件，与 DeepSeek 官方没有隶属关系。源码以 MIT 许可公开在 <a href="https://github.com/xianglifei/dsh-kanban-fx" target="_blank" rel="noreferrer">xianglifei/dsh-kanban-fx</a>，欢迎提 issue 或自己改。</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 · cta -->
+  <section class="cta" aria-labelledby="cta-title">
+    <div class="wrap">
+      <div class="cta-card reveal">
+        <div class="cta-dots" aria-hidden="true"></div>
+        <div class="cta-copy">
+          <p class="kicker light"><span>07</span>下一步</p>
+          <h2 id="cta-title">把下一件事，<br>放进看板。</h2>
+          <p>装好之后，从侧边栏打开它。第一张卡不用想标题，写一句能读懂的话就够了。</p>
+          <div class="cta-actions">
+            <div class="cta-cmd">
+              <code>dsh plugin --profile desktop add github:xianglifei/dsh-kanban-fx</code>
+              <button class="copy-btn dark" type="button" data-copy="dsh plugin --profile desktop add github:xianglifei/dsh-kanban-fx" aria-label="复制安装命令"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span aria-live="polite">复制</span></button>
+            </div>
+            <a class="btn btn-light" href="https://github.com/xianglifei/dsh-kanban-fx" target="_blank" rel="noreferrer"><svg class="ic" aria-hidden="true"><use href="#i-github"/></svg>去 GitHub 看看</a>
+          </div>
+        </div>
+        <div class="cta-art" aria-hidden="true">
+          <div class="cta-mini-card">
+            <span class="status-dot todo"></span>
+            <div><b>第一张卡片</b><small>写一句话就够了</small></div>
+            <span class="mini-run">▶ 执行</span>
+          </div>
+          <div class="cta-mini-card shift">
+            <span class="status-dot done"></span>
+            <div><b>已完成</b><small>可以撤销</small></div>
+            <span class="mini-done">✓</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="#top" aria-label="任务看板 · 回到顶部">
+        <img src="assets/icon.svg" width="30" height="30" alt="" class="brand-mark">
+        <span class="brand-text"><strong>任务看板</strong><span class="brand-sub">dsh-kanban-fx</span></span>
+      </a>
+      <p>给 DeepSeek Harness 做的任务看板。<br>想法进看板，点执行就开跑。</p>
+      <p class="footer-fine">第三方社区插件，与 DeepSeek 官方无隶属关系。</p>
+    </div>
+    <nav class="footer-col" aria-label="站内">
+      <h3>站内</h3>
+      <a href="#why">为什么</a>
+      <a href="#flow">流程</a>
+      <a href="#ui">界面</a>
+      <a href="#features">细节</a>
+      <a href="#install">安装</a>
+      <a href="#faq">问答</a>
+    </nav>
+    <nav class="footer-col" aria-label="资源">
+      <h3>资源</h3>
+      <a href="https://github.com/xianglifei/dsh-kanban-fx" target="_blank" rel="noreferrer">GitHub 仓库</a>
+      <a href="https://github.com/xianglifei/dsh-kanban-fx#readme" target="_blank" rel="noreferrer">README</a>
+      <a href="https://github.com/xianglifei/dsh-kanban-fx/blob/main/CHANGELOG.md" target="_blank" rel="noreferrer">变更记录</a>
+      <a href="https://github.com/xianglifei/dsh-kanban-fx/issues" target="_blank" rel="noreferrer">Issues</a>
+      <a href="https://github.com/xianglifei/dsh-kanban-fx/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT 许可</a>
+    </nav>
+    <div class="footer-col">
+      <h3>版本</h3>
+      <p class="footer-ver"><span class="live-dot" aria-hidden="true"></span>v0.5.0</p>
+      <p class="footer-fine">最近更新 2026-11-14<br>设置页与收尾提示词</p>
+      <a class="text-link small" href="https://github.com/xianglifei/dsh-kanban-fx/commits/main" target="_blank" rel="noreferrer">提交记录<svg class="ic" aria-hidden="true"><use href="#i-external"/></svg></a>
+    </div>
+  </div>
+  <div class="wrap footer-bottom">
+    <p>© 2026 xianglifei · MIT License</p>
+    <p>用 GitHub Pages 托管 · 由仓库里的 <span class="mono">site/</span> 构建</p>
+  </div>
+</footer>
+
+<dialog class="lightbox" id="lightbox" aria-label="查看大图">
+  <form method="dialog" class="lightbox-bar"><span id="lightboxTitle">界面截图</span><button class="icon-btn" value="close" aria-label="关闭大图"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button></form>
+  <img id="lightboxImg" src="assets/img/board-light.webp" alt="">
+</dialog>
+
+<script src="assets/js/site.js"></script>
+</body>
+</html>

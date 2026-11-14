@@ -38,6 +38,11 @@
 - 升级提示：从 0.4.x 升到 0.5.0 后要重载任务看板插件（或在 DSH 里禁用再启用 / 重启 DSH）才会加载
   新的 Host `/settings` 路由；只刷新页面只会更新 Client，点保存会落到旧 Host 的 404「接口不存在」。
   看板数据不受影响；重载可能刷新面板，保存前先把草稿复制出来。
+- 仓库新增 GitHub Pages 官网（`site/`）：首屏、为什么、四步流程、看板 / 列表 / 设置 / 新建待办四组
+  深浅色截图画廊、窄屏展示、细节卡片、安装、FAQ 与收尾 CTA；纯静态 HTML / CSS / JS，无构建步骤。
+  `site/**` 的改动由 `.github/workflows/pages.yml` 发布到 <https://xianglifei.github.io/dsh-kanban-fx/>，
+  另带 `og.png`、`robots.txt`、`sitemap.xml`。README 增加官网入口与本地预览方式；插件代码、版本与
+  `board.json` 均未变。
 - 版本升到 0.5.0（新能力，minor）；`README` / `locale` / `package.json` 同步。
 
 ## 0.4.0 — 2026-11-14

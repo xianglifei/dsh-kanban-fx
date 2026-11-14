@@ -1,6 +1,6 @@
 # 任务看板 · dsh-kanban-fx
 
-仓库：[github.com/xianglifei/dsh-kanban-fx](https://github.com/xianglifei/dsh-kanban-fx) · 许可：[MIT](LICENSE)
+仓库：[github.com/xianglifei/dsh-kanban-fx](https://github.com/xianglifei/dsh-kanban-fx) · 官网：[xianglifei.github.io/dsh-kanban-fx](https://xianglifei.github.io/dsh-kanban-fx/) · 许可：[MIT](LICENSE)
 
 DeepSeek Harness（DSH）Web 插件的任务看板：侧边栏一个入口，每个工作区的「…」菜单里还有一个
 直接落到该工作区的快捷入口；**看板 / 列表**两种视图。
@@ -15,6 +15,17 @@ DeepSeek Harness（DSH）Web 插件的任务看板：侧边栏一个入口，每
 卡片以「收尾中」跑这一轮，正常结束自动进已完成（报错 / 中止回待审核）。
 
 ![四列任务看板](docs/preview.svg)
+
+## 官网
+
+[xianglifei.github.io/dsh-kanban-fx](https://xianglifei.github.io/dsh-kanban-fx/) 是仓库的 GitHub Pages 官网：
+功能、流程、深浅色与窄屏截图、安装命令和常见问题都在这一页。源码在 [`site/`](site/)，纯静态
+HTML / CSS / JS，没有构建步骤；`site/` 的改动由 [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
+构建并发布。本地预览：
+
+```sh
+cd site && python3 -m http.server 4173
+```
 
 ## 界面
 

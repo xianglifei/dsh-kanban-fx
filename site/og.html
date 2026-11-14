@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex">
+<title>OG · 任务看板</title>
+<style>
+  :root {
+    --bg: #f4f4f1; --surface: #fff; --surface-2: #fafaf7; --surface-3: #f0f0eb;
+    --ink: #161616; --ink-2: #4e5155; --ink-3: #6f7378;
+    --line: rgba(22,22,22,.09); --line-strong: rgba(22,22,22,.16);
+    --dot: rgba(22,22,22,.16); --amber-bg: #f8edda; --green-bg: #e7f2eb; --done: #2b7649;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro SC", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    font-family: var(--font); color: var(--ink); background: var(--bg);
+    background-image: radial-gradient(var(--dot) 0.9px, transparent 1px);
+    background-size: 24px 24px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .og { position: relative; width: 100%; height: 100%; padding: 54px 58px; display: flex; gap: 34px; }
+  .fade { position: absolute; inset: 0; background: radial-gradient(ellipse 60% 80% at 25% 35%, rgba(255,255,255,.94), transparent 72%); }
+  .left { position: relative; z-index: 2; width: 560px; flex: none; display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand img { width: 46px; height: 46px; border-radius: 13px; box-shadow: 0 2px 6px rgba(0,0,0,.22); }
+  .brand b { display: block; font-size: 20px; letter-spacing: -.02em; }
+  .brand span { display: block; font-family: var(--mono); font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+  h1 {
+    margin: 38px 0 0; font-size: 58px; line-height: 1.1; letter-spacing: -.048em; font-weight: 700;
+  }
+  h1 em { font-style: normal; background: linear-gradient(180deg, transparent 62%, var(--amber-bg) 62%, var(--amber-bg) 97%, transparent 97%); padding: 0 .04em; }
+  p.sub { margin: 20px 0 0; font-size: 18px; line-height: 1.65; color: var(--ink-2); max-width: 27em; }
+  .meta { margin-top: auto; display: flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+  .chip { padding: 5px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); font-size: 11px; color: var(--ink-2); }
+  .chip.dark { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--line-strong); }
+  .right { position: relative; z-index: 2; flex: 1; margin-top: 12px; }
+  .win { border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: 0 30px 70px -40px rgba(0,0,0,.45), 0 2px 4px rgba(0,0,0,.05); overflow: hidden; }
+  .bar { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+  .bar .mini { width: 15px; height: 15px; border-radius: 4px; }
+  .bar b { font-size: 10px; }
+  .bar .tab { font-size: 8px; color: var(--ink-3); padding: 2px 5px; border-radius: 4px; }
+  .bar .tab.on { background: var(--surface-3); color: var(--ink); }
+  .bar .cta { margin-left: auto; font-size: 8px; background: var(--ink); color: var(--bg); padding: 3px 7px; border-radius: 4px; }
+  .board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 9px; background-image: radial-gradient(rgba(22,22,22,.1) .6px, transparent .7px); background-size: 14px 14px; }
+  .col { border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.72); padding: 6px; min-height: 300px; }
+  .col h3 { margin: 0 0 6px; font-size: 8px; display: flex; align-items: center; gap: 4px; color: var(--ink); }
+  .col h3 i { width: 4px; height: 4px; border-radius: 50%; display: inline-block; }
+  .card { border: 1px solid var(--line); border-radius: 6px; background: #fff; padding: 6px; margin-bottom: 5px; }
+  .card b { display: block; font-size: 8px; line-height: 1.4; }
+  .card p { margin: 3px 0 0; font-size: 6.5px; line-height: 1.5; color: var(--ink-3); }
+  .card .foot { margin-top: 5px; display: flex; justify-content: space-between; font-size: 6px; color: var(--ink-3); }
+  .card .run { border: 1px solid var(--line-strong); border-radius: 3px; padding: 0 3px; font-weight: 600; color: var(--ink); }
+  .tag { display: inline-block; margin-top: 4px; font-size: 6px; background: var(--surface-3); color: var(--ink-3); padding: 1px 3px; border-radius: 3px; }
+  .done { margin-top: 4px; padding: 4px 5px; border: 1px solid var(--line); border-radius: 5px; font-size: 7px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: #fff; }
+  .url { position: absolute; right: 58px; bottom: 26px; z-index: 3; font-family: var(--mono); font-size: 13px; color: var(--ink-3); }
+</style>
+</head>
+<body>
+<div class="og">
+  <div class="fade"></div>
+  <div class="left">
+    <div class="brand">
+      <img src="assets/icon.svg" alt="">
+      <div><b>任务看板</b><span>dsh-kanban-fx</span></div>
+    </div>
+    <h1>想法进看板，<br><em>点执行就开跑。</em></h1>
+    <p class="sub">给 DeepSeek Harness 的看板插件：四列跟着会话走，点「执行」直接开会话、把卡片内容投进去并立刻开跑。</p>
+    <div class="meta">
+      <span class="chip dark">v0.5.0</span>
+      <span class="chip">MIT</span>
+      <span class="chip">四列 · 两视图</span>
+      <span class="chip">数据在本机</span>
+    </div>
+  </div>
+  <div class="right">
+    <div class="win">
+      <div class="bar">
+        <img class="mini" src="assets/icon.svg" alt="">
+        <b>任务看板</b>
+        <span class="tab on">▦ 看板</span>
+        <span class="tab">☰ 列表</span>
+        <span class="cta">＋ 新建待办</span>
+      </div>
+      <div class="board">
+        <div class="col">
+          <h3><i style="background:#8b9095"></i>待办</h3>
+          <div class="card"><b>给列表补多选与批量完成</b><p>勾选多行后一起完成 / 撤销。</p><span class="tag">看板插件</span><div class="foot"><span>还没开始</span><span class="run">▶ 执行</span></div></div>
+          <div class="card"><b>导出当前排序为 Markdown</b><p>带状态、编号与更新时间。</p><span class="tag">看板插件</span><div class="foot"><span>还没开始</span><span class="run">▶ 执行</span></div></div>
+        </div>
+        <div class="col">
+          <h3><i style="background:#171717"></i>进行中</h3>
+          <div class="card"><b>给设置页补键盘导航</b><p>Tab 顺序走完选项、输入框和保存。</p><span class="tag">看板插件</span><div class="foot"><span>● 03:07</span><span>运行中</span></div></div>
+        </div>
+        <div class="col">
+          <h3><i style="background:#b7791f"></i>待审核</h3>
+          <div class="card"><b>修自动保存第二次起的 409</b><p>连点保存时用 draft key 去重。</p><span class="tag">看板插件</span><div class="foot"><span>用时 5 分 0 秒</span><span style="color:#2b7649">✓ 完成</span></div></div>
+        </div>
+        <div class="col">
+          <h3><i style="background:#2b7649"></i>已完成</h3>
+          <div class="done">› 把「新建待办」挪回待办列</div>
+          <div class="done">› 给 SSE 加心跳</div>
+          <div class="done">› 补 README 的安装说明</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="url">xianglifei.github.io/dsh-kanban-fx</div>
+</div>
+</body>
+</html>
