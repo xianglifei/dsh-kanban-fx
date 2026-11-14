@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
         id: 'review',
         zh: '待审核',
         en: 'Review',
-        hintZh: '跑完的卡片会落到这里。点开进会话看结果，满意就点「已完成」。',
+        hintZh: '跑完的卡片会落到这里。点开进会话看结果，满意就点「完成」。',
         hintEn: 'Finished runs land here. Open the conversation, then mark done.',
       },
       {
@@ -1162,6 +1162,7 @@ window.__ModuleLoader__.load({
                     {
                       type: 'button',
                       className: 'fxk-mini fxk-mini-ok',
+                      title: t('标记为已完成，移入已完成列', 'Mark as done and move to the Done column'),
                       disabled: busy === `done:${card.id}`,
                       onClick: (event) => {
                         event.stopPropagation()
@@ -1169,7 +1170,7 @@ window.__ModuleLoader__.load({
                       },
                     },
                     '✓ ',
-                    t('已完成', 'Done'),
+                    t('完成', 'Mark done'),
                   ),
                 )
               : state === 'done'
