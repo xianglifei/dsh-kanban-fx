@@ -162,7 +162,7 @@ window.__ModuleLoader__.load({
   background: color-mix(in srgb, var(--fxk-brand) 10%, transparent);
   color: var(--fxk-brand-ink);
 }
-.fxk-brand-title { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: .01em; white-space: nowrap; }
+.fxk-brand-title { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: .01em; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .fxk-head-spacer { flex: 1; min-width: 4px; }
 /* 右上角是「看板的工作区」切换器，不是筛选器：给个显式标签，免得和侧边栏混淆 */
 .fxk-filter { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
@@ -199,11 +199,17 @@ window.__ModuleLoader__.load({
 .fxk-btn-danger { color: var(--fxk-err); }
 .fxk-btn-danger:hover { background: color-mix(in srgb, var(--fxk-err) 10%, transparent); }
 .fxk-btn-icon { width: 30px; padding: 0; }
+/* 标题旁的图标刷新：只是「立刻重读一次」的兜底，不跟工作区切换器抢位置 */
 .fxk-sync {
-  height: 30px; padding: 0 8px; border: 1px solid transparent; border-radius: 8px;
-  background: transparent; color: var(--fxk-text-2); font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; flex: none; padding: 0; margin-left: 1px;
+  border: 0; border-radius: 6px;
+  background: transparent; color: var(--fxk-text-3);
+  cursor: pointer;
 }
-.fxk-sync:hover { background: var(--fxk-hover); color: var(--fxk-text-2); }
+.fxk-sync:hover { background: var(--fxk-hover); color: var(--fxk-text); }
+.fxk-sync:active { color: var(--fxk-text-2); }
+.fxk-sync:focus-visible { outline: 2px solid color-mix(in srgb, var(--fxk-brand) 55%, transparent); outline-offset: 1px; }
 
 /* ----------------------------------------------------------------- board */
 .fxk-board {
@@ -489,7 +495,6 @@ window.__ModuleLoader__.load({
   .fxk-head-spacer { display: none; }
   .fxk-head .fxk-filter { order: 3; flex: 1 1 100%; width: 100%; }
   .fxk-head .fxk-filter .fxk-select { flex: 1 1 auto; width: auto; max-width: none; }
-  .fxk-head .fxk-sync { display: none; }
   .fxk-col { min-width: 0; }
   .fxk-board { display: flex; flex-direction: column; gap: 12px; padding: 0 14px 14px; }
   .fxk-tabs { display: flex; gap: 6px; padding: 0 14px 10px; flex: none; overflow-x: auto; }
@@ -550,6 +555,35 @@ window.__ModuleLoader__.load({
         h('rect', { x: 7.0, y: 3.6, width: 3.1, height: 8.6, rx: 1.4, fill: 'currentColor', opacity: active ? 0.92 : 0.72 }),
         h('rect', { x: 11.4, y: 3.6, width: 3.1, height: 5.4, rx: 1.4, fill: 'currentColor', opacity: active ? 0.8 : 0.56 }),
         h('rect', { x: 15.8, y: 3.6, width: 1.6, height: 3.4, rx: 0.8, fill: 'currentColor', opacity: active ? 0.7 : 0.4 }),
+      )
+    }
+
+    /** 循环箭头（Lucide rotate-cw，24 网格）：标题旁那个「立刻重读一次」的小按钮。 */
+    function IconRefresh(props) {
+      const size = props && Number(props.size) > 0 ? Number(props.size) : 16
+      return h(
+        'svg',
+        {
+          width: size,
+          height: size,
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          'aria-hidden': true,
+          style: { display: 'block' },
+        },
+        h('path', {
+          d: 'M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8',
+          stroke: 'currentColor',
+          'stroke-width': 2,
+          'stroke-linecap': 'round',
+        }),
+        h('path', {
+          d: 'M21 3v5h-5',
+          stroke: 'currentColor',
+          'stroke-width': 2,
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+        }),
       )
     }
 
@@ -1175,6 +1209,19 @@ window.__ModuleLoader__.load({
             { className: 'fxk-brand' },
             h('span', { className: 'fxk-brand-mark' }, h(IconKanban, { size: 16, active: true })),
             h('span', { className: 'fxk-brand-title' }, t('任务看板', 'Task board')),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'fxk-sync',
+                title: syncedAt
+                  ? t(`立即刷新（上次同步 ${clockOf(syncedAt)}）`, `Refresh now (last synced ${clockOf(syncedAt)})`)
+                  : t('立即刷新', 'Refresh now'),
+                'aria-label': t('刷新看板', 'Refresh board'),
+                onClick: () => void load(),
+              },
+              h(IconRefresh, { size: 15 }),
+            ),
           ),
           h('span', { className: 'fxk-head-spacer' }),
           h(
@@ -1193,18 +1240,6 @@ window.__ModuleLoader__.load({
                 ? filterOptions.map((option) => h('option', { key: option.value, value: option.value }, option.label))
                 : h('option', { value: '', disabled: true }, t('还没有工作区', 'No workspaces yet')),
             ),
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'fxk-sync',
-              title: syncedAt
-                ? t(`立即刷新（上次同步 ${clockOf(syncedAt)}）`, `Refresh now (last synced ${clockOf(syncedAt)})`)
-                : t('立即刷新', 'Refresh now'),
-              onClick: () => void load(),
-            },
-            t('刷新', 'Refresh'),
           ),
           h(
             'button',
