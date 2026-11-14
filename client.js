@@ -40,6 +40,33 @@ window.__ModuleLoader__.load({
       } catch {}
     }
 
+    // 看板已经挂在这一页上时，selectPanel('kanban-fx') 是幂等的：面板不会重挂，
+    // 只写 localStorage 读不到。工作区「…」菜单和会话页「完成」都从这里切工作区，
+    // 由面板自己订阅，两种状态（刚挂载 / 已经在看板上）都能落到同一个筛选值。
+    const viewWorkspaceListeners = new Set()
+
+    function requestViewWorkspace(workspaceId) {
+      if (!workspaceId) return
+      persistViewWorkspace(workspaceId)
+      for (const listener of [...viewWorkspaceListeners]) {
+        try {
+          listener(workspaceId)
+        } catch (failure) {
+          console.error('[kanban-fx] 通知看板切换工作区失败：', failure)
+        }
+      }
+    }
+
+    /** 打开看板并停在指定工作区；工作区「…」菜单与会话页「✓ 完成」共用。 */
+    function openBoardPanel(workspaceId) {
+      const layout = pluginCtx?.get('layout')
+      if (!layout || typeof layout.selectPanel !== 'function') {
+        throw new Error(t('当前 DSH 版本无法打开任务看板', 'This DSH version cannot open the task board'))
+      }
+      requestViewWorkspace(workspaceId)
+      layout.selectPanel('kanban-fx')
+    }
+
     // 视图（看板 / 列表）和列表排序也只写浏览器本地；默认看板，不打断现有用户。
     const VIEW_MODE_KEY = 'dsh-kanban-fx.view'
     const SORT_STATE_KEY = 'dsh-kanban-fx.sort'
@@ -921,6 +948,11 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** 工作区「…」菜单里的看板图标：菜单行的图标位是 16px，侧边栏入口那颗 18px 会顶出来。 */
+    function KanbanMenuIcon() {
+      return h(IconKanban, { size: 16 })
+    }
+
     /** 列表视图图标：三条带点的行，和看板的竖条图标是一对。 */
     function IconList(props) {
       const size = props && Number(props.size) > 0 ? Number(props.size) : 18
@@ -1318,6 +1350,15 @@ window.__ModuleLoader__.load({
         setPickedWorkspaceId(next)
         persistViewWorkspace(next)
       }, [])
+
+      // 工作区「…」菜单 / 会话页「✓ 完成」要求面板切到某个工作区：面板没重挂时靠这条。
+      useEffect(() => {
+        const listener = (workspaceId) => selectWorkspace(workspaceId)
+        viewWorkspaceListeners.add(listener)
+        return () => {
+          viewWorkspaceListeners.delete(listener)
+        }
+      }, [selectWorkspace])
 
       /** 看板 / 列表：只换内容区，头部和工作区选择保持不变。 */
       const selectView = useCallback((next) => {
@@ -2748,7 +2789,7 @@ window.__ModuleLoader__.load({
         if (!layout || typeof layout.selectPanel !== 'function') {
           throw new Error(t('当前 DSH 版本无法打开任务看板', 'This DSH version cannot open the task board'))
         }
-        if (workspaceId) persistViewWorkspace(workspaceId)
+        if (workspaceId) requestViewWorkspace(workspaceId)
         // 面板是切 key 后重新挂载的，提示在挂载时消费；跳转失败就清掉，不留陈年提示
         const notice = { cardId: card.id, seq: card.seq, title: card.title }
         pendingBoardNotice = notice
@@ -2898,6 +2939,27 @@ window.__ModuleLoader__.load({
         } catch (failure) {
           console.error('[kanban-fx] 订阅会话标题栏失败：', failure)
         }
+        // 工作区「…」菜单：把「打开任务看板」放在重命名（order 100）上面。
+        // contextMenus 是可选依赖——没有菜单服务的 profile 里看板照常工作，只是少这一项。
+        try {
+          ctx.inject(['contextMenus'], (menuCtx) => {
+            menuCtx.effect(() => menuCtx.contextMenus.register({
+              id: 'kanban-fx.workspace-board',
+              target: 'workspace',
+              order: 50,
+              resolve: ({ workspaceId }) => (workspaceId ? [{
+                id: 'open-board',
+                label: t('打开任务看板', 'Open task board'),
+                icon: { key: 'kanban-fx.board' },
+                failureLabel: t('打不开任务看板，请重试', 'Could not open the task board'),
+                run: () => { openBoardPanel(workspaceId) },
+              }] : []),
+            }), 'kanban-fx: 工作区菜单入口')
+          })
+        } catch (failure) {
+          console.error('[kanban-fx] 注册工作区菜单失败：', failure)
+        }
+        contribute(ctx, { name: 'contextMenu.icon', key: 'kanban-fx.board' }, KanbanMenuIcon, '工作区菜单图标')
       },
     }
   },
