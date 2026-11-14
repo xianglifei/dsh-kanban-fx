@@ -6,8 +6,10 @@
  * - 通过 ctx.webServer 暴露看板 HTTP 接口给 Client 半
  * - 「执行」：建（或复用）会话 → 把卡片内容作为一条 user 消息投进去 → 立刻开跑
  *   （首条消息 = 手写标题作第一行 + 正文原样；没写标题时只发正文）
- * - 状态机：由会话本身的事件推导（turn/start → 进行中，turn/end → 待审核），
- *   只有「已完成」是用户手点的标记；用户在会话里再发消息会自动回到进行中
+ * - 状态机：由会话本身的事件推导（turn/start → 进行中，turn/end → 待审核）；
+ *   设置「完成之后」= prompt 时，点完成先发一条收尾提示词，turn/end 正常结束自动已完成，
+ *   报错 / 中止回待审核；否则「已完成」仍是用户手点的标记。用户在会话里再发消息会自动回到进行中
+ * - 用户设置（完成之后 / 收尾提示词）和卡片一起存在 board.json 的 settings 里，不走 cordis 配置
  *
  * 这个插件刻意不 import 任何 @deepseek-ai/* 包：profile 里的插件按普通 ESM 解析，
  * 只依赖 node 内置模块与 ctx 上的服务。消息体按 DSH 的 UserMessage 结构就地构造
@@ -25,11 +27,28 @@ const SSE_MAX_CLIENTS = 8
 const SSE_HEARTBEAT_MS = 25_000
 const BODY_LIMIT_BYTES = 40 * 1024 * 1024
 
-const DEFAULTS = {
+const CONFIG_DEFAULTS = {
   dataDir: '',
   maxBodyChars: 200000,
   maxCardAttachmentBytes: 24 * 1024 * 1024,
 }
+
+// 完成设置：点「完成」之后什么都不做，或先发一条收尾提示词、等这一轮正常跑完再自动完成。
+// 存在 board.json 的顶层 settings 里，不动 cordis 配置，所以改完立即生效、不重启插件。
+const COMPLETION_MODES = new Set(['none', 'prompt'])
+const PROMPT_MAX_CHARS = 4000
+// 收尾提示词刚投递时 agent 可能还没醒；给它比普通 run 更长的宽限，避免 reconcile 误判
+const FINISH_GRACE_MS = 10_000
+
+const PACKAGE_VERSION = (() => {
+  try {
+    return String(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version || '')
+  } catch {
+    return ''
+  }
+})()
+
+const DEFAULT_COMPLETION = { mode: 'none', prompt: '' }
 
 const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 
@@ -161,15 +180,43 @@ function statusOf(card) {
   return STATUS.REVIEW
 }
 
-function normalizeSettings(config) {
+function normalizeConfig(config) {
   const input = config && typeof config === 'object' ? config : {}
-  const settings = { ...DEFAULTS }
+  const settings = { ...CONFIG_DEFAULTS }
   if (typeof input.dataDir === 'string' && input.dataDir.trim()) settings.dataDir = input.dataDir.trim()
   if (Number.isFinite(input.maxBodyChars) && input.maxBodyChars > 0) settings.maxBodyChars = Math.floor(input.maxBodyChars)
   if (Number.isFinite(input.maxCardAttachmentBytes) && input.maxCardAttachmentBytes > 0) {
     settings.maxCardAttachmentBytes = Math.floor(input.maxCardAttachmentBytes)
   }
   return settings
+}
+
+function defaultUserSettings() {
+  return { completion: { ...DEFAULT_COMPLETION } }
+}
+
+/**
+ * 读盘 / 脏数据用：只收白名单，超长截断；mode=prompt 却没有提示词时回落 none。
+ * 这里不抛错——坏设置不能拖垮插件启动，接口写入另走 userSettingsFromRequest。
+ */
+function sanitizeUserSettings(input) {
+  const completion =
+    input && typeof input === 'object' && input.completion && typeof input.completion === 'object' ? input.completion : null
+  const prompt = completion ? textOf(completion.prompt, PROMPT_MAX_CHARS).trim() : ''
+  const mode = completion && completion.mode === 'prompt' && prompt ? 'prompt' : 'none'
+  return { completion: { mode, prompt } }
+}
+
+/** 接口写入用：严格校验，非法值 400，绝不把半截设置写进 board.json。 */
+function userSettingsFromRequest(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw httpError(400, '设置格式不正确')
+  const completion = input.completion
+  if (!completion || typeof completion !== 'object' || Array.isArray(completion)) throw httpError(400, '缺少完成设置')
+  if (!COMPLETION_MODES.has(completion.mode)) throw httpError(400, '完成设置的值不合法')
+  const prompt = typeof completion.prompt === 'string' ? completion.prompt.trim() : ''
+  if (prompt.length > PROMPT_MAX_CHARS) throw httpError(400, `收尾提示词最多 ${PROMPT_MAX_CHARS} 字符`)
+  if (completion.mode === 'prompt' && !prompt) throw httpError(400, '选择发送收尾提示词时，提示词不能为空')
+  return { completion: { mode: completion.mode, prompt } }
 }
 
 /** 一张卡片对外（Client）的形状：不含附件字节。 */
@@ -194,6 +241,8 @@ function viewOf(card) {
       height: attachment.height,
     })),
     status: statusOf(card),
+    // 「收尾中」不是第五种状态：status 仍是 running，这里只给 Client 一个派生标识
+    finishing: Boolean(card.finishingSince),
     sessionId: card.sessionId,
     sessionArchived: Boolean(card.sessionArchived),
     runningSince: card.runningSince,
@@ -208,7 +257,7 @@ function viewOf(card) {
 }
 
 function emptyStore() {
-  return { version: STORE_VERSION, rev: 1, nextSeq: 1, lastWorkspaceId: null, cards: {} }
+  return { version: STORE_VERSION, rev: 1, nextSeq: 1, lastWorkspaceId: null, settings: defaultUserSettings(), cards: {} }
 }
 
 function loadStore(file) {
@@ -243,6 +292,7 @@ function loadStore(file) {
         lastRunEndedAt: Number(card.lastRunEndedAt) || null,
         lastRunMs: Number(card.lastRunMs) || null,
         doneAt: Number(card.doneAt) || null,
+        finishingSince: Number(card.finishingSince) || null,
         error: typeof card.error === 'string' && card.error ? card.error : null,
       }
     }
@@ -273,6 +323,7 @@ function loadStore(file) {
       rev: Number(parsed.rev) || 1,
       nextSeq: Number.isInteger(storedNext) && storedNext > highest + 1 ? storedNext : highest + 1,
       lastWorkspaceId: typeof parsed.lastWorkspaceId === 'string' ? parsed.lastWorkspaceId : null,
+      settings: sanitizeUserSettings(parsed.settings),
       cards,
     }
   } catch (error) {
@@ -282,10 +333,13 @@ function loadStore(file) {
 }
 
 export function apply(ctx, config) {
-  const settings = normalizeSettings(config)
-  const dataDir = settings.dataDir || join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'dsh-kanban-fx')
+  const configSettings = normalizeConfig(config)
+  const dataDir = configSettings.dataDir || join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'dsh-kanban-fx')
   const storeFile = join(dataDir, 'board.json')
   const store = loadStore(storeFile)
+  // 用户设置跟看板数据走；插件配置只留 dataDir / 上限，两套东西不混。
+  let userSettings = sanitizeUserSettings(store.settings)
+  store.settings = userSettings
 
   const sseClients = new Set()
   /** response → 心跳计时器，连接断开 / 插件卸载时一起清掉。 */
@@ -418,8 +472,8 @@ export function apply(ctx, config) {
       }
       const bytes = base64ToBytes(item.data)
       total += bytes.length
-      if (total > settings.maxCardAttachmentBytes) {
-        throw httpError(413, `附件总大小超过上限（${Math.round(settings.maxCardAttachmentBytes / 1024 / 1024)} MB）`)
+      if (total > configSettings.maxCardAttachmentBytes) {
+        throw httpError(413, `附件总大小超过上限（${Math.round(configSettings.maxCardAttachmentBytes / 1024 / 1024)} MB）`)
       }
       const name = textOf(item.name, 200)
       if (item.kind === 'image') {
@@ -631,7 +685,7 @@ export function apply(ctx, config) {
       id: `card-${randomUUID()}`,
       seq: allocateSeq(),
       title: titleOf(input?.title),
-      body: textOf(input?.body, settings.maxBodyChars),
+      body: textOf(input?.body, configSettings.maxBodyChars),
       workspaceId: typeof input?.workspaceId === 'string' && input.workspaceId ? input.workspaceId : null,
       attachments,
       sessionId: null,
@@ -643,6 +697,7 @@ export function apply(ctx, config) {
       lastRunEndedAt: null,
       lastRunMs: null,
       doneAt: null,
+      finishingSince: null,
       error: null,
     }
     store.cards[card.id] = card
@@ -659,7 +714,7 @@ export function apply(ctx, config) {
     if (card.sessionId) throw httpError(409, '已经执行过的卡片不能再改内容（去会话里继续）')
     const attachments = await saveAttachments(input?.attachments)
     card.title = titleOf(input?.title)
-    card.body = textOf(input?.body, settings.maxBodyChars)
+    card.body = textOf(input?.body, configSettings.maxBodyChars)
     card.workspaceId = typeof input?.workspaceId === 'string' && input.workspaceId ? input.workspaceId : null
     card.attachments = attachments
     if (card.workspaceId) store.lastWorkspaceId = card.workspaceId
@@ -687,16 +742,93 @@ export function apply(ctx, config) {
     return null
   }
 
-  /** 用户手点「完成」；只有待审核的卡片能点。看板传 id，会话页标题栏传 sessionId。 */
-  function markDone(input) {
+  /**
+   * 用户手点「完成」；只有待审核的卡片能点。看板传 id，会话页标题栏传 sessionId。
+   *
+   * mode = none：和以前一样，立刻 doneAt。
+   * mode = prompt：先把收尾提示词作为一条普通 user 消息投给当前会话，卡片进入
+   * 「进行中 + finishingSince」；turn/end 正常结束时才自动 doneAt。
+   * 会话已归档 / 找不到时不再瞎试，直接完成并回一个 fallback 警告。
+   */
+  async function markDone(input) {
     const card = input?.id ? cardOf(input) : cardBySession(input?.sessionId)
     if (!card) {
       throw httpError(404, input?.sessionId ? '这个会话没有关联的看板卡片' : '卡片不存在')
     }
     if (statusOf(card) !== STATUS.REVIEW) throw httpError(409, '只有待审核的卡片可以标记完成')
-    card.doneAt = Date.now()
-    touch(card, 'done')
-    return card
+
+    const completion = userSettings.completion
+    // 脏数据 / 空提示词按「什么都不做」处理，别让一次点完成变成无法完成的错误
+    if (completion.mode !== 'prompt' || !completion.prompt) {
+      card.doneAt = Date.now()
+      card.finishingSince = null
+      touch(card, 'done')
+      return { card, completionResult: 'done', completionWarning: null }
+    }
+
+    const sessionId = card.sessionId
+    const sessionArchived = Boolean(card.sessionArchived || (sessionId && archivedSessionIds().includes(sessionId)))
+    if (!sessionId || sessionArchived) {
+      if (sessionArchived) card.sessionArchived = true
+      card.doneAt = Date.now()
+      card.finishingSince = null
+      touch(card, 'done')
+      return {
+        card,
+        completionResult: 'fallback-done',
+        completionWarning: sessionArchived ? 'session-archived' : 'session-missing',
+      }
+    }
+
+    const controller = ctx.get('sessionController')
+    if (!controller || typeof controller.resolveAgent !== 'function') {
+      throw httpError(503, '当前 DSH 版本没有会话服务，无法发送收尾提示词')
+    }
+    const resolved = await resolveAgent(controller, sessionId)
+    if (!resolved || !resolved.agent) {
+      if (resolved?.error?.code === 'session/not-found') {
+        card.sessionArchived = true
+        card.doneAt = Date.now()
+        card.finishingSince = null
+        touch(card, 'done')
+        return { card, completionResult: 'fallback-done', completionWarning: 'session-missing' }
+      }
+      throw httpError(409, `会话无法继续：${resolved?.error?.message || '未知原因'}`)
+    }
+
+    // 先记「收尾中」再投递：客户端立刻能看到卡片动，重复点击也会被 statusOf 挡住。
+    const previous = {
+      runningSince: card.runningSince,
+      lastRunStartedAt: card.lastRunStartedAt,
+      lastRunEndedAt: card.lastRunEndedAt,
+      doneAt: card.doneAt,
+      error: card.error,
+      finishingSince: card.finishingSince,
+    }
+    const startedAt = Date.now()
+    card.runningSince = startedAt
+    card.lastRunStartedAt = startedAt
+    card.lastRunEndedAt = null
+    card.doneAt = null
+    card.error = null
+    card.finishingSince = startedAt
+    touch(card, 'finishing')
+
+    const message = {
+      id: randomUUID(),
+      role: 'user',
+      content: [{ type: 'text', text: completion.prompt }],
+      source: { kind: 'user' },
+    }
+    try {
+      resolved.agent.followup(message)
+    } catch (error) {
+      // 投递失败就回到点之前的样子；不要留下一个永远「收尾中」的卡
+      Object.assign(card, previous)
+      touch(card, 'finishing-failed')
+      throw httpError(409, `收尾提示词发送失败：${error?.message ?? String(error)}`)
+    }
+    return { card, completionResult: 'sent', completionWarning: null }
   }
 
   function markUndone(input) {
@@ -726,6 +858,19 @@ export function apply(ctx, config) {
       if (card.sessionId && archived.includes(card.sessionId) && !card.sessionArchived) {
         card.sessionArchived = true
         dirty = true
+      }
+      // 收尾中：给足 10s 让 agent 醒过来；确认它没在跑就回待审核，绝不猜成功。
+      if (card.finishingSince) {
+        if (now - card.finishingSince < FINISH_GRACE_MS) continue
+        const finishingAgent = card.sessionId ? agents?.get?.(card.sessionId) : undefined
+        if (finishingAgent && finishingAgent.status === 'running') continue
+        card.finishingSince = null
+        card.runningSince = null
+        card.lastRunEndedAt = now
+        // 不收尾轮的时长覆盖原任务用时：完成/待审核卡片仍显示最后一次任务运行的时间
+        card.error = card.error || '收尾没有跑起来，请再点一次完成'
+        dirty = true
+        continue
       }
       if (!card.runningSince) continue
       // 刚投递的几毫秒里 agent 可能还没被唤醒，留一点余量再判「其实已经停了」
@@ -758,17 +903,27 @@ export function apply(ctx, config) {
       return
     }
     if (event.type === 'turn/end') {
-      if (!card.runningSince && card.lastRunEndedAt) return
+      const finishing = Boolean(card.finishingSince)
+      if (!card.runningSince && card.lastRunEndedAt && !finishing) return
+      const reason = event.data && event.data.reason
       card.runningSince = null
       card.lastRunEndedAt = event.time
-      card.lastRunMs = card.lastRunStartedAt ? Math.max(0, event.time - card.lastRunStartedAt) : null
-      const reason = event.data && event.data.reason
+      // 收尾轮不覆盖原任务的用时：完成卡片仍显示最后一次任务运行了多久
+      if (!finishing) {
+        card.lastRunMs = card.lastRunStartedAt ? Math.max(0, event.time - card.lastRunStartedAt) : null
+      }
       if (reason && reason.kind === 'error') {
         card.error = reason.error?.message || '运行失败'
       } else if (reason && reason.kind === 'aborted') {
         card.error = null
       }
-      touch(card, 'turn-end')
+      if (finishing) {
+        card.finishingSince = null
+        const failed = Boolean(reason && (reason.kind === 'error' || reason.kind === 'aborted'))
+        // 只有正常结束才自动完成；报错 / 中止一律回待审核
+        card.doneAt = failed ? null : event.time
+      }
+      touch(card, finishing ? 'turn-end-finishing' : 'turn-end')
     }
   })
 
@@ -822,6 +977,17 @@ export function apply(ctx, config) {
       cards: Object.values(store.cards).sort((a, b) => a.createdAt - b.createdAt).map(viewOf),
       workspaces,
       defaultWorkspaceId,
+      settings: { completion: { ...userSettings.completion } },
+      advanced: {
+        version: PACKAGE_VERSION,
+        dataDir,
+        storeFile,
+        storeVersion: STORE_VERSION,
+        limits: {
+          maxBodyChars: configSettings.maxBodyChars,
+          maxCardAttachmentBytes: configSettings.maxCardAttachmentBytes,
+        },
+      },
     }
   }
 
@@ -910,7 +1076,9 @@ export function apply(ctx, config) {
       }
       reconcile()
       const card = cardBySession(sessionId)
-      sendJson(res, 200, { ok: true, card: card ? viewOf(card) : null })
+      // completionMode 只给会话标题栏判断 tooltip 用；看板卡片自己从 settings 里读
+      const view = card ? { ...viewOf(card), completionMode: userSettings.completion.mode } : null
+      sendJson(res, 200, { ok: true, card: view })
       return true
     }
 
@@ -956,20 +1124,42 @@ export function apply(ctx, config) {
       return true
     }
 
+    if (req.method === 'POST' && path === `${PREFIX}/settings`) {
+      const body = await readJson(req)
+      const next = userSettingsFromRequest(body.settings)
+      userSettings = next
+      store.settings = next
+      broadcast('settings')
+      saveNow()
+      sendJson(res, 200, boardPayload())
+      return true
+    }
+
     if (req.method === 'POST' && path === `${PREFIX}/card`) {
       const body = await readJson(req)
       const action = typeof body.action === 'string' ? body.action : ''
       let card = null
+      let completionResult = null
+      let completionWarning = null
       if (action === 'create') card = await createCard(body.card, Boolean(body.run))
       // id 既接受 card.id（现在的客户端），也接受顶层 id（旧客户端 / 手工调用）
       else if (action === 'update') card = await updateCard({ ...(body.card || {}), id: body.id ?? body.card?.id })
       else if (action === 'delete') card = removeCard(body)
       else if (action === 'run') card = await runCard(cardOf(body))
-      else if (action === 'done') card = markDone(body)
-      else if (action === 'undone') card = markUndone(body)
+      else if (action === 'done') {
+        const result = await markDone(body)
+        card = result.card
+        completionResult = result.completionResult
+        completionWarning = result.completionWarning
+      } else if (action === 'undone') card = markUndone(body)
       else throw httpError(400, `未知操作：${action || '(空)'}`)
       if (card) saveNow()
-      sendJson(res, 200, { ...boardPayload(), card: card ? viewOf(card) : null })
+      const payload = { ...boardPayload(), card: card ? viewOf(card) : null }
+      if (completionResult) {
+        payload.completionResult = completionResult
+        if (completionWarning) payload.completionWarning = completionWarning
+      }
+      sendJson(res, 200, payload)
       return true
     }
 

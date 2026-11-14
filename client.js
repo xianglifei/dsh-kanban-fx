@@ -1,7 +1,7 @@
 /**
  * 任务看板 · Client 半。
  *
- * 侧边栏入口 + 主面板：四列看板（待办 / 进行中 / 待审核 / 已完成）。
+ * 侧边栏入口 + 主面板：四列看板（待办 / 进行中 / 待审核 / 已完成），以及顶栏齿轮里的设置页。
  * 数据全部来自 Host 半的 /kanban-fx 接口；这里只负责渲染、计时和交互。
  */
 window.__ModuleLoader__.load({
@@ -19,6 +19,9 @@ window.__ModuleLoader__.load({
     // 自动保存：停手 1.2 秒先存一次，连续打字时再每 8 秒兜底存一次
     const AUTOSAVE_IDLE_MS = 1200
     const AUTOSAVE_INTERVAL_MS = 8000
+    // 设置页：收尾提示词上限跟 Host 保持一致；停手 600ms 自动保存
+    const PROMPT_MAX_CHARS = 4000
+    const SETTINGS_SAVE_IDLE_MS = 600
     // 看板是「某个工作区的视图」，没有「全部」。视图工作区记在浏览器本地：
     // 优先级 localStorage → defaultWorkspaceId（= 校验过的 lastWorkspaceId）→ 工作区列表第一个。
     const VIEW_WORKSPACE_KEY = 'dsh-kanban-fx.view-workspace'
@@ -168,7 +171,8 @@ window.__ModuleLoader__.load({
     // ------------------------------------------- session header (card status)
     // 会话 → 卡片的探测结果：命中先画、再后台刷新，切回会话时标题栏不会闪一下空。
     const headerCardCache = new Map()
-    // 从会话标题栏点「完成」跳回看板时，交接给看板面板的一条提示（带撤销）。
+    // 从会话标题栏点「完成」跳回看板时，交接给看板面板的一条提示。
+    // outcome: done（带撤销）/ finishing（提示词已发出，没有可撤销的）/ fallback-done（会话不可用但已完成）
     let pendingBoardNotice = null
 
     /** 一个 POST /kanban-fx/card 的薄封装：解析、校验、抛错，不碰看板状态。 */
@@ -482,6 +486,7 @@ window.__ModuleLoader__.load({
 .fxk-mini-run:hover { background: color-mix(in srgb, var(--fxk-brand) 10%, transparent); }
 .fxk-timer { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; line-height: 18px; color: var(--fxk-text-2); font-variant-numeric: tabular-nums; }
 .fxk-timer b { font-weight: 600; color: var(--fxk-text); font-family: var(--fxk-mono); font-size: 12px; }
+.fxk-finishing-label { color: var(--fxk-text); font-weight: 560; }
 .fxk-pulse {
   width: 6px; height: 6px; border-radius: 999px; flex: none;
   background: var(--fxk-brand);
@@ -745,6 +750,115 @@ window.__ModuleLoader__.load({
 .fxk-hint { font-size: 11.5px; line-height: 17px; color: var(--fxk-text-2); }
 .fxk-err { font-size: 12px; line-height: 18px; color: color-mix(in srgb, var(--fxk-err) 85%, var(--fxk-text)); }
 
+/* ---------------------------------------------------------------- settings */
+.fxk-gear { flex: none; color: var(--fxk-text-2); }
+.fxk-gear:hover { color: var(--fxk-text); }
+.fxk-settings { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; width: 100%; }
+.fxk-settings-head {
+  flex: none; width: calc(100% - 40px); max-width: 760px; margin: 0 auto;
+  display: flex; align-items: center; gap: 10px;
+  min-height: 62px; padding: 10px 0 8px;
+}
+.fxk-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 10px 0 8px;
+  border: 1px solid var(--fxk-border); border-radius: 8px;
+  background: var(--fxk-surface); color: var(--fxk-text-2);
+  font-size: 12px; line-height: 1; cursor: pointer;
+}
+.fxk-back:hover { background: var(--fxk-hover); color: var(--fxk-text); }
+.fxk-back-arrow { font-size: 14px; line-height: 1; }
+.fxk-settings-title {
+  margin: 0; font-size: 15px; line-height: 22px; font-weight: 600;
+  letter-spacing: .01em; color: var(--fxk-text);
+}
+.fxk-settings-title:focus-visible { outline: 2px solid color-mix(in srgb, var(--fxk-link) 70%, transparent); outline-offset: 4px; border-radius: 4px; }
+.fxk-settings-sub { font-size: 11.5px; line-height: 17px; color: var(--fxk-text-3); white-space: nowrap; }
+.fxk-settings-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 20px 24px; }
+.fxk-settings-body { width: 100%; max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.fxk-settings-card {
+  padding: 18px 20px 16px;
+  border: 1px solid var(--fxk-border); border-radius: 14px;
+  background: var(--fxk-card); box-shadow: var(--fxk-shadow);
+}
+.fxk-settings-card h2 { margin: 0 0 4px; font-size: 13.5px; line-height: 20px; font-weight: 600; color: var(--fxk-text); }
+.fxk-settings-desc { margin: 0 0 14px; font-size: 12px; line-height: 18px; color: var(--fxk-text-2); }
+.fxk-settings-fieldset { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 8px; }
+.fxk-radio {
+  position: relative; display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--fxk-border-soft); border-radius: 10px;
+  cursor: pointer; transition: border-color 120ms, background 120ms;
+}
+.fxk-radio:hover { background: var(--fxk-hover); }
+.fxk-radio[data-checked="true"] {
+  border-color: color-mix(in srgb, var(--fxk-brand) 34%, var(--fxk-border));
+  background: color-mix(in srgb, var(--fxk-brand) 5%, transparent);
+}
+.fxk-radio:focus-within { outline: 2px solid color-mix(in srgb, var(--fxk-link) 70%, transparent); outline-offset: 2px; }
+.fxk-radio input { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; opacity: 0; pointer-events: none; }
+.fxk-radio-dot {
+  flex: none; width: 16px; height: 16px; margin-top: 2px;
+  border: 1.5px solid var(--fxk-border); border-radius: 999px;
+  background: var(--fxk-card);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.fxk-radio[data-checked="true"] .fxk-radio-dot { border-color: var(--fxk-brand); }
+.fxk-radio[data-checked="true"] .fxk-radio-dot::after {
+  content: ""; width: 8px; height: 8px; border-radius: 999px; background: var(--fxk-brand);
+}
+.fxk-radio-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fxk-radio-title { font-size: 12.5px; line-height: 18px; font-weight: 560; color: var(--fxk-text); }
+.fxk-radio-desc { font-size: 11.5px; line-height: 17px; color: var(--fxk-text-2); }
+.fxk-settings-field { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.fxk-settings-label { font-size: 12px; line-height: 18px; font-weight: 560; color: var(--fxk-text); }
+.fxk-settings-textarea {
+  width: 100%; min-height: 104px; resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--fxk-border); border-radius: 10px;
+  background: var(--fxk-surface); color: var(--fxk-text);
+  font: inherit; font-size: 12.5px; line-height: 19px;
+}
+.fxk-settings-textarea:focus { outline: 2px solid color-mix(in srgb, var(--fxk-link) 70%, transparent); outline-offset: 1px; }
+.fxk-settings-textarea[aria-invalid="true"] { border-color: var(--fxk-err); }
+.fxk-settings-textarea[disabled] { opacity: .6; }
+.fxk-settings-field-foot { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.fxk-settings-hint { flex: 1; font-size: 11.5px; line-height: 17px; color: var(--fxk-text-3); }
+.fxk-settings-count { flex: none; font-size: 11px; line-height: 17px; color: var(--fxk-text-3); font-variant-numeric: tabular-nums; }
+.fxk-settings-count[data-over="true"] { color: var(--fxk-err); }
+.fxk-settings-error { margin: 2px 0 0; font-size: 11.5px; line-height: 17px; color: color-mix(in srgb, var(--fxk-err) 85%, var(--fxk-text)); }
+.fxk-settings-note { margin: 12px 0 0; font-size: 11.5px; line-height: 17px; color: var(--fxk-text-3); }
+.fxk-settings-subhead { margin: 16px 0 2px; font-size: 11.5px; line-height: 17px; font-weight: 560; color: var(--fxk-text-2); }
+.fxk-advanced { display: flex; flex-direction: column; }
+.fxk-advanced-row { display: flex; align-items: center; gap: 16px; padding: 8px 0; border-top: 1px solid var(--fxk-border-soft); font-size: 12px; line-height: 18px; }
+.fxk-advanced-row:first-child { border-top: 0; }
+.fxk-advanced-key { flex: none; width: 150px; color: var(--fxk-text-2); }
+.fxk-advanced-val { flex: 1 1 auto; min-width: 0; color: var(--fxk-text); word-break: break-word; }
+.fxk-advanced-path { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fxk-path { font-family: var(--fxk-mono); font-size: 11px; line-height: 17px; color: var(--fxk-text-2); word-break: break-all; }
+.fxk-settings-actions {
+  flex: none;
+  width: calc(100% - 40px); max-width: 760px; margin: 0 auto;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 10px 0 14px;
+  border-top: 1px solid var(--fxk-border-soft);
+  background: var(--fxk-canvas);
+}
+.fxk-settings-status-wrap { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fxk-settings-status { font-size: 11.5px; line-height: 17px; color: var(--fxk-text-3); }
+.fxk-settings-save { min-width: 96px; }
+.fxk-settings-errorbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--fxk-err) 28%, var(--fxk-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fxk-err) 7%, var(--fxk-card));
+  color: color-mix(in srgb, var(--fxk-err) 75%, var(--fxk-text));
+  font-size: 12px; line-height: 18px;
+}
+.fxk-settings-errorbar span { flex: 1; min-width: 0; }
+.fxk-settings-skeleton-gap { height: 14px; }
+
 /* ---------------------------------------------------------------- toast */
 .fxk-toast {
   position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
@@ -768,6 +882,14 @@ window.__ModuleLoader__.load({
 
 @container (max-width: 700px) {
   .fxk-head { min-height: 56px; padding: 8px 14px 6px; flex-wrap: wrap; gap: 8px; row-gap: 6px; }
+  .fxk-settings-head { width: calc(100% - 28px); min-height: 56px; padding: 8px 0 6px; }
+  .fxk-settings-scroll { padding: 0 14px 20px; }
+  .fxk-settings-card { padding: 14px; border-radius: 12px; }
+  .fxk-settings-sub { display: none; }
+  .fxk-advanced-row { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .fxk-advanced-key { width: auto; }
+  .fxk-settings-actions { width: calc(100% - 28px); flex-direction: column; align-items: stretch; padding: 8px 0 12px; }
+  .fxk-settings-save { width: 100%; }
   .fxk-brand { flex: 1 1 auto; min-width: 0; }
   .fxk-head-spacer { display: none; }
   .fxk-head .fxk-filter { order: 3; flex: 1 1 100%; width: 100%; }
@@ -825,6 +947,9 @@ window.__ModuleLoader__.load({
 /* 手机上先把标题行收紧一档，保住「看板 / 列表」两个文字标签 */
 @container (max-width: 430px) {
   .fxk-head { gap: 6px; }
+  .fxk-settings-head { gap: 6px; }
+  .fxk-back { width: 30px; padding: 0; justify-content: center; }
+  .fxk-back-label { display: none; }
   .fxk-viewswitch { margin-left: 2px; }
   .fxk-viewswitch button { padding: 0 8px; }
   /* 保住「看板 / 列表」两个标签：顶部新建收成 +（表尾那条带文字的新建还在） */
@@ -876,6 +1001,7 @@ window.__ModuleLoader__.load({
 }
 .fxk-hd-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--fxk-hd-text-3); flex: none; }
 .fxk-hd-state[data-state="running"] .fxk-hd-dot { background: var(--fxk-hd-run); }
+.fxk-hd-state[data-state="finishing"] .fxk-hd-dot { background: var(--fxk-hd-run); }
 .fxk-hd-state[data-state="review"] .fxk-hd-dot { background: var(--fxk-hd-review); }
 .fxk-hd-state[data-state="done"] .fxk-hd-dot { background: var(--fxk-hd-done); }
 .fxk-hd-btn {
@@ -986,6 +1112,30 @@ window.__ModuleLoader__.load({
         { width: 10, height: 14, viewBox: '0 0 10 14', fill: 'none', 'aria-hidden': true, className: 'fxk-sort' },
         h('path', { d: 'M5 1.4 7.7 4.8H2.3L5 1.4Z', fill: 'currentColor', opacity: active ? (dir === 'asc' ? 1 : 0.18) : 0.5 }),
         h('path', { d: 'M5 12.6 2.3 9.2h5.4L5 12.6Z', fill: 'currentColor', opacity: active ? (dir === 'desc' ? 1 : 0.18) : 0.5 }),
+      )
+    }
+
+    /** 设置齿轮：一颗安静的小 cog，放在顶栏最右侧。 */
+    function IconGear(props) {
+      const size = props && Number(props.size) > 0 ? Number(props.size) : 16
+      return h(
+        'svg',
+        {
+          width: size,
+          height: size,
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.7,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          'aria-hidden': true,
+          style: { display: 'block' },
+        },
+        h('circle', { cx: 12, cy: 12, r: 3.1 }),
+        h('path', {
+          d: 'M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6h.03a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.03a1.7 1.7 0 0 0 1.56 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.97Z',
+        }),
       )
     }
 
@@ -1172,6 +1322,502 @@ window.__ModuleLoader__.load({
     }
 
     // ----------------------------------------------------------------- panel
+    /**
+     * 设置页：主体只做一件可编辑的事——点「完成」之后做什么；下面是只读高级信息。
+     *
+     * 草稿只活在这个组件里；停手 600ms 自动保存，页脚另有显式「保存」。
+     * 数据来自 /board 的 settings / advanced，保存走 POST /kanban-fx/settings，
+     * 不回写 cordis 配置，所以改完立即生效、不重启插件。
+     */
+    function SettingsPage(props) {
+      const settings = props.settings
+      const advanced = props.advanced
+      const loading = Boolean(props.loading)
+      const error = props.error || ''
+      const initial = settings && settings.completion ? settings.completion : { mode: 'none', prompt: '' }
+      const [mode, setMode] = useState(initial.mode === 'prompt' ? 'prompt' : 'none')
+      const [prompt, setPrompt] = useState(typeof initial.prompt === 'string' ? initial.prompt : '')
+      const [phase, setPhase] = useState('idle')
+      const [failure, setFailure] = useState('')
+      const [savedAt, setSavedAt] = useState(null)
+      const modeRef = useRef(mode)
+      const promptRef = useRef(prompt)
+      const dirtyRef = useRef(false)
+      const savingRef = useRef(false)
+      const inflightRef = useRef('')
+      const queuedRef = useRef(false)
+      const timerRef = useRef(null)
+      const mountedRef = useRef(true)
+      const disabledRef = useRef(false)
+      const titleRef = useRef(null)
+      const saveRef = useRef(null)
+
+      const promptChars = prompt.trim().length
+      const promptError =
+        promptChars > PROMPT_MAX_CHARS
+          ? t(`提示词最多 ${PROMPT_MAX_CHARS} 字符`, `The prompt is limited to ${PROMPT_MAX_CHARS} characters`)
+          : mode === 'prompt' && promptChars === 0
+            ? t('写一条提示词后再保存', 'Write a prompt before saving')
+            : ''
+      const invalid = Boolean(promptError)
+      const disabled = Boolean(error)
+      disabledRef.current = disabled
+
+      useEffect(() => {
+        mountedRef.current = true
+        titleRef.current?.focus?.()
+        return () => {
+          mountedRef.current = false
+          if (timerRef.current) clearTimeout(timerRef.current)
+          // 切面板 / 关页面时补存一次：合法且有未保存改动才发；失败静默，下次进来还能改。
+          const draftMode = modeRef.current
+          const draftPrompt = promptRef.current
+          const valid =
+            draftPrompt.trim().length <= PROMPT_MAX_CHARS &&
+            (draftMode !== 'prompt' || Boolean(draftPrompt.trim()))
+          if (dirtyRef.current && valid && !disabledRef.current && !savingRef.current) {
+            void props.onSave({ mode: draftMode, prompt: draftPrompt.trim() }).catch(() => {})
+          }
+        }
+      }, [])
+
+      // 别的标签页改了设置，或自己保存后的服务端回写：没有本地草稿时静默同步
+      useEffect(() => {
+        if (dirtyRef.current || savingRef.current) return
+        const next = settings && settings.completion ? settings.completion : { mode: 'none', prompt: '' }
+        const nextMode = next.mode === 'prompt' ? 'prompt' : 'none'
+        const nextPrompt = typeof next.prompt === 'string' ? next.prompt : ''
+        if (nextMode === modeRef.current && nextPrompt === promptRef.current) return
+        modeRef.current = nextMode
+        promptRef.current = nextPrompt
+        setMode(nextMode)
+        setPrompt(nextPrompt)
+        setPhase('idle')
+        setFailure('')
+      }, [settings])
+
+      const save = async (silent) => {
+        if (!mountedRef.current) return false
+        const draftMode = modeRef.current
+        const draftPrompt = promptRef.current
+        // 同一份草稿只允许一个请求在飞：失焦补存 + 点保存常常会前后脚触发
+        const draftKey = `${draftMode}\u0000${draftPrompt}`
+        if (savingRef.current) {
+          if (inflightRef.current !== draftKey) queuedRef.current = true
+          return false
+        }
+        const trimmed = draftPrompt.trim()
+        if (trimmed.length > PROMPT_MAX_CHARS) {
+          setPhase('invalid')
+          setFailure(t(`提示词最多 ${PROMPT_MAX_CHARS} 字符`, `The prompt is limited to ${PROMPT_MAX_CHARS} characters`))
+          return false
+        }
+        if (draftMode === 'prompt' && !trimmed) {
+          setPhase('invalid')
+          setFailure(t('写一条提示词后再保存', 'Write a prompt before saving'))
+          return false
+        }
+        if (disabled) {
+          setPhase('error')
+          setFailure(t('看板数据读取失败，暂时不能保存', 'The board could not be loaded, so settings cannot be saved'))
+          return false
+        }
+        savingRef.current = true
+        inflightRef.current = draftKey
+        if (!silent) setPhase('saving')
+        setFailure('')
+        try {
+          await props.onSave({ mode: draftMode, prompt: trimmed })
+          if (modeRef.current === draftMode && promptRef.current === draftPrompt) {
+            dirtyRef.current = false
+            if (mountedRef.current) {
+              setPhase('saved')
+              setSavedAt(Date.now())
+            }
+          }
+          return true
+        } catch (saveFailure) {
+          if (mountedRef.current) {
+            setPhase('error')
+            setFailure(String(saveFailure?.message ?? saveFailure))
+          }
+          return false
+        } finally {
+          savingRef.current = false
+          inflightRef.current = ''
+          if (queuedRef.current) {
+            queuedRef.current = false
+            void saveRef.current?.(true)
+          }
+        }
+      }
+      saveRef.current = save
+
+      const schedule = () => {
+        if (timerRef.current) clearTimeout(timerRef.current)
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null
+          // 已经通过「保存」落库的草稿不必再自动保存一次
+          if (dirtyRef.current) void saveRef.current?.(true)
+        }, SETTINGS_SAVE_IDLE_MS)
+      }
+
+      const touchDraft = () => {
+        dirtyRef.current = true
+        setPhase('dirty')
+        schedule()
+      }
+
+      const changeMode = (next) => {
+        const value = next === 'prompt' ? 'prompt' : 'none'
+        if (value === modeRef.current) return
+        modeRef.current = value
+        setMode(value)
+        touchDraft()
+      }
+
+      const changePrompt = (next) => {
+        promptRef.current = next
+        setPrompt(next)
+        touchDraft()
+      }
+
+      const leave = async () => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current)
+          timerRef.current = null
+        }
+        // 有合法草稿且没有请求在飞：先存，失败就留在设置页看错误，不静默丢内容。
+        // 不合法 / 看板读取失败 / 失焦补存已经在飞时允许直接返回，服务端保留上一次有效设置。
+        if (dirtyRef.current && !invalid && !disabled && !savingRef.current) {
+          const saved = await saveRef.current?.(true)
+          if (!saved) return
+        }
+        props.onBack()
+      }
+
+      const copy = async (value) => {
+        if (!value) return
+        const ok = await copyText(value)
+        props.notify?.({ text: ok ? t('已复制', 'Copied') : t('复制失败', 'Copy failed') })
+      }
+
+      const statusText = disabled
+        ? t('看板读取失败，设置暂不可用', 'The board could not be loaded — settings are unavailable')
+        : phase === 'saving'
+          ? t('保存中…', 'Saving…')
+          : phase === 'error'
+            ? t('保存失败', 'Save failed')
+            : dirtyRef.current
+              ? t('有未保存的改动', 'Unsaved changes')
+              : savedAt
+                ? t(`已保存 ${clockOf(savedAt)}`, `Saved ${clockOf(savedAt)}`)
+                : t('自动保存已开启', 'Autosave is on')
+
+      const radio = (value, title, description) =>
+        h(
+          'label',
+          { className: 'fxk-radio', 'data-checked': String(mode === value) },
+          h('input', {
+            type: 'radio',
+            name: 'fxk-completion-mode',
+            value,
+            checked: mode === value,
+            disabled,
+            onChange: () => changeMode(value),
+          }),
+          h('span', { className: 'fxk-radio-dot', 'aria-hidden': 'true' }),
+          h(
+            'span',
+            { className: 'fxk-radio-text' },
+            h('span', { className: 'fxk-radio-title' }, title),
+            h('span', { className: 'fxk-radio-desc' }, description),
+          ),
+        )
+
+      const copyButton = (value) =>
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'fxk-mini',
+            disabled: !value,
+            title: t('复制路径', 'Copy path'),
+            onClick: () => void copy(value),
+          },
+          t('复制', 'Copy'),
+        )
+
+      const advancedRow = (key, value) =>
+        h(
+          'div',
+          { className: 'fxk-advanced-row' },
+          h('span', { className: 'fxk-advanced-key' }, key),
+          h('div', { className: 'fxk-advanced-val' }, value),
+        )
+
+      const viewLabel = props.view === 'list' ? t('列表', 'List') : t('看板', 'Board')
+      const sortColumn = LIST_COLUMNS.find((item) => item.key === props.sort?.key) || LIST_COLUMNS[0]
+      const sortLabel = `${t(sortColumn.zh, sortColumn.en)} ${props.sort?.dir === 'desc' ? '↓' : '↑'}`
+      const limits = advanced && advanced.limits ? advanced.limits : null
+      const showForm = Boolean(settings) || (!loading && !error)
+
+      const settingsTitle = h(
+        'h1',
+        { className: 'fxk-settings-title', tabIndex: -1, ref: titleRef },
+        t('设置', 'Settings'),
+      )
+
+      const body = h(
+        'div',
+        { className: 'fxk-settings-scroll' },
+        h(
+          'div',
+          { className: 'fxk-settings-body' },
+          error
+            ? h(
+                'div',
+                { className: 'fxk-settings-errorbar', role: 'alert' },
+                h('span', null, error),
+                h('button', { type: 'button', className: 'fxk-btn', onClick: props.onRetry }, t('重试', 'Retry')),
+              )
+            : null,
+          loading && !settings
+            ? h(
+                'section',
+                { className: 'fxk-settings-card' },
+                h('span', { className: 'fxk-skeleton-bar' }),
+                h('div', { className: 'fxk-settings-skeleton-gap' }),
+                h('span', { className: 'fxk-skeleton-bar' }),
+              )
+            : showForm
+              ? [
+                  h(
+                    'section',
+                    { key: 'completion', className: 'fxk-settings-card' },
+                    h('h2', null, t('完成之后', 'After marking done')),
+                    h(
+                      'p',
+                      { className: 'fxk-settings-desc' },
+                      t(
+                        '设置点「完成」之后发生什么。对整个看板生效，不分工作区。',
+                        'Choose what happens after you mark a card done. Applies to the whole board, across workspaces.',
+                      ),
+                    ),
+                    h(
+                      'fieldset',
+                      { className: 'fxk-settings-fieldset' },
+                      h('legend', { className: 'fxk-sr-only' }, t('点完成之后', 'After marking done')),
+                      radio(
+                        'none',
+                        t('什么都不做（默认）', 'Do nothing (default)'),
+                        t('点「完成」立即移入已完成，和现在一样。', 'Moves the card to Done immediately, as before.'),
+                      ),
+                      radio(
+                        'prompt',
+                        t('发送一条收尾提示词，跑完自动完成', 'Send a wrap-up prompt, then complete automatically'),
+                        t(
+                          '先把提示词发给这张卡片的会话；这一轮正常跑完就自动移入已完成。',
+                          'Sends the prompt to this card’s conversation first; the card moves to Done when that turn finishes normally.',
+                        ),
+                      ),
+                    ),
+                    mode === 'prompt'
+                      ? h(
+                          'div',
+                          { className: 'fxk-settings-field' },
+                          h(
+                            'label',
+                            { className: 'fxk-settings-label', htmlFor: 'fxk-wrap-prompt' },
+                            t('收尾提示词', 'Wrap-up prompt'),
+                          ),
+                          h('textarea', {
+                            id: 'fxk-wrap-prompt',
+                            className: 'fxk-settings-textarea',
+                            value: prompt,
+                            rows: 4,
+                            disabled,
+                            placeholder: t(
+                              '例如：把这轮改动补进 CHANGELOG.md，写清改了什么、为什么，然后提交。',
+                              'e.g. Add this change to CHANGELOG.md, explain what changed and why, then commit.',
+                            ),
+                            'aria-invalid': promptError ? 'true' : undefined,
+                            'aria-describedby': promptError ? 'fxk-wrap-help fxk-wrap-count fxk-wrap-error' : 'fxk-wrap-help fxk-wrap-count',
+                            onChange: (event) => changePrompt(event.target.value),
+                            onBlur: () => {
+                              if (dirtyRef.current) void saveRef.current?.(true)
+                            },
+                          }),
+                          h(
+                            'div',
+                            { className: 'fxk-settings-field-foot' },
+                            h(
+                              'span',
+                              { id: 'fxk-wrap-help', className: 'fxk-settings-hint' },
+                              t(
+                                '会作为一条普通用户消息发进会话，不加前缀。建议写成能一次做完的指令。',
+                                'Sent as a normal user message with no prefix. Write it as a single, self-contained instruction.',
+                              ),
+                            ),
+                            h(
+                              'span',
+                              {
+                                id: 'fxk-wrap-count',
+                                className: 'fxk-settings-count',
+                                'data-over': String(promptChars > PROMPT_MAX_CHARS),
+                              },
+                              `${promptChars} / ${PROMPT_MAX_CHARS}`,
+                            ),
+                          ),
+                          promptError
+                            ? h(
+                                'p',
+                                { id: 'fxk-wrap-error', className: 'fxk-settings-error', role: 'alert' },
+                                promptError,
+                              )
+                            : null,
+                        )
+                      : null,
+                    h(
+                      'p',
+                      { className: 'fxk-settings-note' },
+                      t(
+                        '如果这一轮报错或被中止，卡片会回到待审核，不会标成已完成。',
+                        'If the turn fails or is aborted, the card returns to Review instead of being marked done.',
+                      ),
+                    ),
+                  ),
+                  h(
+                    'section',
+                    { key: 'advanced', className: 'fxk-settings-card' },
+                    h('h2', null, t('高级', 'Advanced')),
+                    h(
+                      'p',
+                      { className: 'fxk-settings-desc' },
+                      t('诊断信息与本地界面偏好，只读；不会改动卡片数据。', 'Diagnostics and local interface preferences. Read-only — card data is untouched.'),
+                    ),
+                    h(
+                      'div',
+                      { className: 'fxk-advanced' },
+                      advancedRow(
+                        t('数据目录', 'Data directory'),
+                        h(
+                          'div',
+                          { className: 'fxk-advanced-path' },
+                          h('code', { className: 'fxk-path' }, advanced?.dataDir || '—'),
+                          copyButton(advanced?.dataDir),
+                        ),
+                      ),
+                      advancedRow(
+                        t('数据文件', 'Data file'),
+                        h(
+                          'div',
+                          { className: 'fxk-advanced-path' },
+                          h('code', { className: 'fxk-path' }, advanced?.storeFile || '—'),
+                          copyButton(advanced?.storeFile),
+                        ),
+                      ),
+                      advancedRow(t('存储版本', 'Storage version'), String(advanced?.storeVersion ?? '—')),
+                      advancedRow(t('卡片总数', 'Cards'), String(props.cardCount ?? 0)),
+                      advancedRow(
+                        t('正文字符上限', 'Body limit'),
+                        limits ? t(`${Number(limits.maxBodyChars).toLocaleString()} 字符`, `${Number(limits.maxBodyChars).toLocaleString()} characters`) : '—',
+                      ),
+                      advancedRow(
+                        t('附件大小上限', 'Attachment limit'),
+                        limits ? formatBytes(limits.maxCardAttachmentBytes) : '—',
+                      ),
+                    ),
+                    h(
+                      'p',
+                      { className: 'fxk-settings-note' },
+                      t(
+                        '上限与数据目录在 cordis.patch.yml 中修改，重启后生效；这里只显示当前值。',
+                        'Limits and the data directory live in cordis.patch.yml and apply after a restart; this page only shows the current values.',
+                      ),
+                    ),
+                    h('div', { className: 'fxk-settings-subhead' }, t('界面偏好（本机）', 'Interface preferences (this browser)')),
+                    h(
+                      'div',
+                      { className: 'fxk-advanced' },
+                      advancedRow(t('默认视图', 'Default view'), viewLabel),
+                      advancedRow(t('列表排序', 'List sort'), sortLabel),
+                      advancedRow(
+                        t('恢复默认', 'Reset'),
+                        h(
+                          'button',
+                          { type: 'button', className: 'fxk-mini', onClick: props.onResetView },
+                          t('恢复视图与排序默认值', 'Reset view and sort'),
+                        ),
+                      ),
+                    ),
+                    h('div', { className: 'fxk-settings-subhead' }, t('关于', 'About')),
+                    h(
+                      'div',
+                      { className: 'fxk-advanced' },
+                      advancedRow(t('插件版本', 'Plugin version'), advanced?.version || '—'),
+                      advancedRow(t('数据格式版本', 'Data format'), String(advanced?.storeVersion ?? '—')),
+                      advancedRow(t('接口前缀', 'API prefix'), h('code', { className: 'fxk-path' }, API)),
+                    ),
+                  ),
+                ]
+              : null,
+        ),
+      )
+
+      // 保存状态 / 按钮固定在页脚，不跟着 advanced 一起滚到屏幕外
+      const actions = showForm
+        ? h(
+            'div',
+            { className: 'fxk-settings-actions' },
+            h(
+              'div',
+              { className: 'fxk-settings-status-wrap' },
+              h('span', { className: 'fxk-settings-status', role: 'status', 'aria-live': 'polite' }, statusText),
+              phase === 'error' && failure
+                ? h('p', { className: 'fxk-settings-error', role: 'alert' }, failure)
+                : null,
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'fxk-btn fxk-btn-primary fxk-settings-save',
+                disabled: disabled || invalid || phase === 'saving' || !dirtyRef.current,
+                onClick: () => void saveRef.current?.(),
+              },
+              phase === 'saving' ? t('保存中…', 'Saving…') : t('保存', 'Save'),
+            ),
+          )
+        : null
+
+      return h(
+        'div',
+        { className: 'fxk-settings' },
+        h(
+          'header',
+          { className: 'fxk-settings-head' },
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'fxk-back',
+              'aria-label': t('返回任务看板', 'Back to the task board'),
+              title: t('返回任务看板', 'Back to the task board'),
+              onClick: () => void leave(),
+            },
+            h('span', { className: 'fxk-back-arrow', 'aria-hidden': 'true' }, '←'),
+            h('span', { className: 'fxk-back-label' }, t('返回', 'Back')),
+          ),
+          settingsTitle,
+          h('span', { className: 'fxk-head-spacer' }),
+          h('span', { className: 'fxk-settings-sub' }, t('任务看板', 'Task board')),
+        ),
+        body,
+        actions,
+      )
+    }
+
     function Panel() {
       const [board, setBoard] = useState(null)
       const [loading, setLoading] = useState(true)
@@ -1183,6 +1829,8 @@ window.__ModuleLoader__.load({
       const [modal, setModal] = useState(null)
       const [busy, setBusy] = useState('')
       const [toast, setToast] = useState(null)
+      // 设置页是面板里的第三块内容，不写 localStorage：刷新后回到看板 / 列表
+      const [settingsOpen, setSettingsOpen] = useState(false)
       // 「已完成」列默认折叠成标题行；只有用户点开的那几张会展开，状态只活在这个面板里。
       const [expandedDone, setExpandedDone] = useState(() => new Set())
       const [now, setNow] = useState(() => Date.now())
@@ -1195,6 +1843,9 @@ window.__ModuleLoader__.load({
           cards: Array.isArray(payload.cards) ? payload.cards : [],
           workspaces: Array.isArray(payload.workspaces) ? payload.workspaces : [],
           defaultWorkspaceId: payload.defaultWorkspaceId || null,
+          // 设置跟着看板一起读：SSE 一推 rev，设置页和卡片 tooltip 都自动同步
+          settings: payload.settings && payload.settings.completion ? payload.settings : null,
+          advanced: payload.advanced && typeof payload.advanced === 'object' ? payload.advanced : null,
         })
         setError('')
       }, [])
@@ -1223,6 +1874,28 @@ window.__ModuleLoader__.load({
           applyBoard(body)
           if (!(options && options.silent)) setError('')
           return body
+        },
+        [applyBoard],
+      )
+
+      /** 保存「完成之后」。响应是完整看板载荷，复用 applyBoard，所有标签页跟着 rev 同步。 */
+      const saveSettings = useCallback(
+        async (completion) => {
+          const response = await fetch(`${API}/settings`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ settings: { completion } }),
+          })
+          const payload = await response.json().catch(() => null)
+          if (!response.ok || !payload || payload.ok !== true) {
+            throw new Error(
+              (payload && payload.error) ||
+                t(`设置保存失败（${response.status}）`, `Could not save settings (${response.status})`),
+            )
+          }
+          applyBoard(payload)
+          setError('')
+          return payload
         },
         [applyBoard],
       )
@@ -1285,6 +1958,8 @@ window.__ModuleLoader__.load({
 
       const cards = board ? board.cards : []
       const workspaces = board ? board.workspaces : []
+      // 「完成」按钮的 tooltip 跟着设置走：prompt 模式下它先发提示词，不是立刻完成
+      const completionMode = board && board.settings && board.settings.completion ? board.settings.completion.mode : 'none'
       const workspaceIds = workspaces.map((workspace) => workspace.id)
       const orphanCards = cards.filter((card) => !card.workspaceId)
       const missingCards = cards.filter((card) => card.workspaceId && !workspaceIds.includes(card.workspaceId))
@@ -1328,22 +2003,57 @@ window.__ModuleLoader__.load({
         setToast(next ? { kind: 'info', ...next, at: Date.now() } : null)
       }, [])
 
-      // 从会话标题栏点「完成」跳回来时，接住那条提示（带撤销）。
-      // 读一次就清掉：面板重新挂载时不会重复弹。
+      /** 高级区「恢复视图与排序默认值」：只清本地界面偏好，不碰工作区记忆和卡片数据。 */
+      const resetViewPrefs = useCallback(() => {
+        try {
+          window.localStorage.removeItem(VIEW_MODE_KEY)
+          window.localStorage.removeItem(SORT_STATE_KEY)
+        } catch {}
+        setView('board')
+        setSort({ ...DEFAULT_SORT })
+        notify({ text: t('已恢复默认视图与排序', 'Default view and sort restored') })
+      }, [notify])
+
+      // 从会话标题栏点「完成」跳回来时，接住那条提示。
+      // done 带撤销；finishing 只是「提示词发出去了」，没有可撤销的东西。
       useEffect(() => {
         const notice = pendingBoardNotice
         if (!notice) return
         pendingBoardNotice = null
         const label = notice.seq ? `fx-${notice.seq}` : notice.title || t('这张卡片', 'the card')
-        notify({
-          text: t(`已把 ${label} 移到已完成`, `Moved ${label} to done`),
-          undo: () => {
-            void post('undone', { id: notice.cardId }).catch((failure) => notify({ kind: 'error', text: String(failure?.message ?? failure) }))
-          },
-        })
+        const undo = () => {
+          void post('undone', { id: notice.cardId }).catch((failure) => notify({ kind: 'error', text: String(failure?.message ?? failure) }))
+        }
+        if (notice.outcome === 'finishing') {
+          notify({
+            text: t(
+              `已发送 ${label} 的收尾提示词，跑完自动完成`,
+              `Sent the wrap-up prompt for ${label}; it will complete automatically.`,
+            ),
+          })
+          return
+        }
+        if (notice.outcome === 'fallback-done') {
+          notify({
+            text: t(
+              `会话不可用，已直接完成 ${label}（收尾提示词未发送）`,
+              `Conversation unavailable — ${label} was marked done without the wrap-up prompt.`,
+            ),
+            undo,
+          })
+          return
+        }
+        notify({ text: t(`已把 ${label} 移到已完成`, `Moved ${label} to done`), undo })
       }, [notify, post])
 
       const openCreate = useCallback(() => setModal({ mode: 'create', card: null }), [])
+
+      const gearRef = useRef(null)
+      const closeSettings = useCallback(() => {
+        setSettingsOpen(false)
+        // 返回后把焦点放回齿轮，键盘用户不会掉到页面开头
+        window.setTimeout(() => gearRef.current?.focus?.(), 0)
+      }, [])
 
       /** 切换看板视图的工作区，并记住这个选择（只写浏览器本地，不碰服务端）。 */
       const selectWorkspace = useCallback((next) => {
@@ -1417,13 +2127,25 @@ window.__ModuleLoader__.load({
         async (card) => {
           setBusy(`done:${card.id}`)
           try {
-            await post('done', { id: card.id })
-            notify({
-              text: t('已移入已完成', 'Moved to done'),
-              undo: () => {
-                void post('undone', { id: card.id }).catch((failure) => notify({ kind: 'error', text: String(failure?.message ?? failure) }))
-              },
-            })
+            const body = await post('done', { id: card.id })
+            const undo = () => {
+              void post('undone', { id: card.id }).catch((failure) => notify({ kind: 'error', text: String(failure?.message ?? failure) }))
+            }
+            if (body.completionResult === 'sent') {
+              notify({
+                text: t('已发送收尾提示词，跑完自动完成', 'Sent the wrap-up prompt — the card will complete when it finishes'),
+              })
+            } else if (body.completionResult === 'fallback-done') {
+              notify({
+                text: t(
+                  '会话不可用，已直接标记完成（收尾提示词未发送）',
+                  'Conversation unavailable — marked done without the wrap-up prompt',
+                ),
+                undo,
+              })
+            } else {
+              notify({ text: t('已移入已完成', 'Moved to done'), undo })
+            }
           } catch (failure) {
             notify({ kind: 'error', text: String(failure?.message ?? failure) })
           } finally {
@@ -1592,7 +2314,7 @@ window.__ModuleLoader__.load({
             'data-state': state,
             role: 'button',
             tabIndex: 0,
-            'aria-label': card.title,
+            'aria-label': card.finishing ? t(`${card.title}（收尾中）`, `${card.title} (wrapping up)`) : card.title,
             onClick: () => openCard(card),
             onKeyDown: (event) => {
               // 内部按钮（折叠箭头 / 撤销 / 执行）自己处理键盘，不再冒泡触发「打开会话」。
@@ -1618,7 +2340,18 @@ window.__ModuleLoader__.load({
             ? h(
                 'div',
                 { className: 'fxk-card-foot' },
-                h('span', { className: 'fxk-timer' }, h('span', { className: 'fxk-pulse' }), h('b', null, formatElapsed(elapsedOf(card))), h('span', null, t('运行中', 'running'))),
+                h(
+                  'span',
+                  {
+                    className: 'fxk-timer',
+                    title: card.finishing
+                      ? t('收尾提示词正在跑，跑完自动完成', 'The wrap-up prompt is running; the card completes automatically')
+                      : undefined,
+                  },
+                  h('span', { className: 'fxk-pulse' }),
+                  h('b', null, formatElapsed(elapsedOf(card))),
+                  h('span', { className: card.finishing ? 'fxk-finishing-label' : undefined }, card.finishing ? t('收尾中', 'wrapping up') : t('运行中', 'running')),
+                ),
                 h('span', { className: 'fxk-card-foot-spacer' }),
                 card.lastRunStartedAt ? h('span', { className: 'fxk-hint' }, t(`开始于 ${formatClock(card.lastRunStartedAt)}`, `since ${formatClock(card.lastRunStartedAt)}`)) : null,
               )
@@ -1653,7 +2386,10 @@ window.__ModuleLoader__.load({
                     {
                       type: 'button',
                       className: 'fxk-mini fxk-mini-ok',
-                      title: t('标记为已完成，移入已完成列', 'Mark as done and move to the Done column'),
+                      title:
+                        completionMode === 'prompt'
+                          ? t('标记完成，并先发送收尾提示词', 'Mark done and send the wrap-up prompt first')
+                          : t('标记为已完成，移入已完成列', 'Mark as done and move to the Done column'),
                       disabled: busy === `done:${card.id}`,
                       onClick: (event) => {
                         event.stopPropagation()
@@ -1838,7 +2574,10 @@ window.__ModuleLoader__.load({
                 key: 'done',
                 type: 'button',
                 className: 'fxk-act fxk-act-ok',
-                title: t('标记为已完成，移入已完成', 'Mark as done'),
+                title:
+                  completionMode === 'prompt'
+                    ? t('标记完成，并先发送收尾提示词', 'Mark done and send the wrap-up prompt first')
+                    : t('标记为已完成，移入已完成', 'Mark as done'),
                 disabled: busy === `done:${card.id}`,
                 onClick: () => void markDone(card),
               },
@@ -1878,9 +2617,13 @@ window.__ModuleLoader__.load({
             { className: 'fxk-td fxk-td-status c-status' },
             h(
               'span',
-              { className: 'fxk-state', 'data-state': state },
+              {
+                className: 'fxk-state',
+                'data-state': state,
+                title: card.finishing ? t('进行中 · 收尾', 'Running · wrap-up') : undefined,
+              },
               h('span', { className: 'fxk-state-dot', 'aria-hidden': 'true' }),
-              h('span', null, statusLabelOf(state)),
+              h('span', null, card.finishing ? t('收尾中', 'Wrapping up') : statusLabelOf(state)),
             ),
           ),
           h('td', { className: 'fxk-td fxk-td-seq c-seq' }, cardSeqLabel(card) || '—'),
@@ -1891,7 +2634,15 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'fxk-task' },
               // 窄屏状态列收起，用标题前的色点代替；宽屏这个点 display:none
-              h('span', { className: 'fxk-mob-dot', 'data-state': state, role: 'img', 'aria-label': statusLabelOf(state) }),
+              h(
+                'span',
+                {
+                  className: 'fxk-mob-dot',
+                  'data-state': state,
+                  role: 'img',
+                  'aria-label': card.finishing ? t('收尾中', 'Wrapping up') : statusLabelOf(state),
+                },
+              ),
               h('button', { type: 'button', className: 'fxk-title', title: card.title }, card.title),
               attachmentCount
                 ? h('span', { className: 'fxk-att', title: t('附件', 'Attachments') }, `📎 ${attachmentCount}`)
@@ -1993,6 +2744,51 @@ window.__ModuleLoader__.load({
           : []),
       ]
 
+      const toastNode = toast
+        ? h(
+            'div',
+            { className: 'fxk-toast', role: 'status' },
+            h('span', { className: 'fxk-toast-text' }, toast.text),
+            toast.undo
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: () => {
+                      const undo = toast.undo
+                      setToast(null)
+                      if (undo) undo()
+                    },
+                  },
+                  t('撤销', 'Undo'),
+                )
+              : null,
+            h('button', { type: 'button', onClick: () => setToast(null), 'aria-label': t('关掉提示', 'Dismiss') }, '✕'),
+          )
+        : null
+
+      if (settingsOpen) {
+        return h(
+          'div',
+          { className: 'fxk-root', 'data-view': 'settings' },
+          h(SettingsPage, {
+            settings: board ? board.settings : null,
+            advanced: board ? board.advanced : null,
+            loading,
+            error,
+            view,
+            sort,
+            cardCount: cards.length,
+            onSave: saveSettings,
+            onResetView: resetViewPrefs,
+            onBack: closeSettings,
+            onRetry: () => void load(),
+            notify,
+          }),
+          toastNode,
+        )
+      }
+
       return h(
         'div',
         { className: 'fxk-root', 'data-narrow': narrowCol, 'data-view': view },
@@ -2065,6 +2861,21 @@ window.__ModuleLoader__.load({
             h('span', { className: 'fxk-new-plus' }, '+'),
             h('span', { className: 'fxk-new-label' }, t('新建待办', 'New card')),
           ),
+          h(
+            'button',
+            {
+              ref: gearRef,
+              type: 'button',
+              className: 'fxk-btn fxk-btn-icon fxk-gear',
+              title: t('设置', 'Settings'),
+              'aria-label': t('设置', 'Settings'),
+              onClick: () => {
+                setModal(null)
+                setSettingsOpen(true)
+              },
+            },
+            h(IconGear, { size: 16 }),
+          ),
         ),
         view === 'board'
           ? h(
@@ -2112,28 +2923,7 @@ window.__ModuleLoader__.load({
               onClose: () => setModal(null),
             })
           : null,
-        toast
-          ? h(
-              'div',
-              { className: 'fxk-toast', role: 'status' },
-              h('span', { className: 'fxk-toast-text' }, toast.text),
-              toast.undo
-                ? h(
-                    'button',
-                    {
-                      type: 'button',
-                      onClick: () => {
-                        const undo = toast.undo
-                        setToast(null)
-                        if (undo) undo()
-                      },
-                    },
-                    t('撤销', 'Undo'),
-                  )
-                : null,
-              h('button', { type: 'button', onClick: () => setToast(null), 'aria-label': t('关掉提示', 'Dismiss') }, '✕'),
-            )
-          : null,
+        toastNode,
       )
     }
 
@@ -2716,6 +3506,12 @@ window.__ModuleLoader__.load({
         hintZh: '会话正在跑，跑完会落到待审核',
         hintEn: 'The run is in progress and lands in review when it finishes',
       },
+      finishing: {
+        zh: '收尾中',
+        en: 'Wrapping up',
+        hintZh: '收尾提示词正在跑，跑完自动完成',
+        hintEn: 'The wrap-up prompt is running; the card completes automatically',
+      },
       review: {
         zh: '待审核',
         en: 'In review',
@@ -2745,6 +3541,7 @@ window.__ModuleLoader__.load({
       const running = useSession((snapshot) => snapshot.running)
       const alive = useRef(true)
       const wasRunning = useRef(running)
+      const outcomeRef = useRef('done')
 
       const load = useCallback(async () => {
         try {
@@ -2781,17 +3578,22 @@ window.__ModuleLoader__.load({
 
       if (card === undefined || card === null || card.sessionArchived) return null
 
-      const state = running ? 'running' : card.status === 'done' ? 'done' : 'review'
+      const cardRunning = Boolean(card && card.status === 'running')
+      const state = running || cardRunning
+        ? (card.finishing ? 'finishing' : 'running')
+        : card.status === 'done'
+          ? 'done'
+          : 'review'
       const meta = HEADER_STATE[state]
 
-      const openBoard = (workspaceId) => {
+      const openBoard = (workspaceId, outcome = 'done') => {
         const layout = pluginCtx?.get('layout')
         if (!layout || typeof layout.selectPanel !== 'function') {
           throw new Error(t('当前 DSH 版本无法打开任务看板', 'This DSH version cannot open the task board'))
         }
         if (workspaceId) requestViewWorkspace(workspaceId)
         // 面板是切 key 后重新挂载的，提示在挂载时消费；跳转失败就清掉，不留陈年提示
-        const notice = { cardId: card.id, seq: card.seq, title: card.title }
+        const notice = { cardId: card.id, seq: card.seq, title: card.title, outcome }
         pendingBoardNotice = notice
         try {
           layout.selectPanel('kanban-fx')
@@ -2820,6 +3622,13 @@ window.__ModuleLoader__.load({
           return
         }
         const updated = (body && body.card) || { ...card, status: 'done', doneAt: Date.now() }
+        const outcome =
+          body && body.completionResult === 'sent'
+            ? 'finishing'
+            : body && body.completionResult === 'fallback-done'
+              ? 'fallback-done'
+              : 'done'
+        outcomeRef.current = outcome
         headerCardCache.set(sessionId, updated)
         if (!alive.current) return
         setCard(updated)
@@ -2828,7 +3637,8 @@ window.__ModuleLoader__.load({
         const workspaces = Array.isArray(body && body.workspaces) ? body.workspaces : []
         const workspaceId = workspaces.some((item) => item.id === updated.workspaceId) ? updated.workspaceId : null
         try {
-          openBoard(workspaceId)
+          // 三个入口的「完成」都跳回看板；prompt 模式只是落点变成进行中（收尾中）
+          openBoard(workspaceId, outcome)
         } catch (error) {
           // 已经标好了，只是没跳过去：留一个「打开看板」的按钮兜底
           setFailure(String(error?.message ?? error))
@@ -2838,15 +3648,20 @@ window.__ModuleLoader__.load({
 
       const openBoardAgain = () => {
         try {
-          openBoard(card.workspaceId || null)
+          openBoard(card.workspaceId || null, outcomeRef.current)
         } catch (error) {
           setFailure(String(error?.message ?? error))
         }
       }
 
-      const doneHint = card.seq
-        ? t(`标记为已完成，回到任务看板（fx-${card.seq}）`, `Mark as done and return to the task board (fx-${card.seq})`)
-        : t('标记为已完成，回到任务看板', 'Mark as done and return to the task board')
+      const doneHint =
+        card.completionMode === 'prompt'
+          ? card.seq
+            ? t(`发送收尾提示词，跑完后自动完成（fx-${card.seq}）`, `Send the wrap-up prompt and complete automatically (fx-${card.seq})`)
+            : t('发送收尾提示词，跑完后自动完成', 'Send the wrap-up prompt and complete automatically')
+          : card.seq
+            ? t(`标记为已完成，回到任务看板（fx-${card.seq}）`, `Mark as done and return to the task board (fx-${card.seq})`)
+            : t('标记为已完成，回到任务看板', 'Mark as done and return to the task board')
 
       const button =
         phase === 'board'
