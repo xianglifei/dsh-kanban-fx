@@ -673,9 +673,26 @@ export function apply(ctx, config) {
     return card
   }
 
-  /** 用户手点「已完成」；只有待审核的卡片能点。 */
+  /**
+   * 会话 id → 卡片。必须核对 card.sessionId 本身，不能只看 bySession：
+   * 卡片「重新执行」后，旧会话在 bySession 里仍指向同一张卡，但卡已经换了会话，
+   * 从旧会话点「完成」应该找不到卡片（返回 null），而不是标到新会话那张卡上。
+   */
+  function cardBySession(sessionId) {
+    const id = typeof sessionId === 'string' ? sessionId : ''
+    if (!id) return null
+    for (const card of Object.values(store.cards)) {
+      if (card.sessionId === id) return card
+    }
+    return null
+  }
+
+  /** 用户手点「完成」；只有待审核的卡片能点。看板传 id，会话页标题栏传 sessionId。 */
   function markDone(input) {
-    const card = cardOf(input)
+    const card = input?.id ? cardOf(input) : cardBySession(input?.sessionId)
+    if (!card) {
+      throw httpError(404, input?.sessionId ? '这个会话没有关联的看板卡片' : '卡片不存在')
+    }
     if (statusOf(card) !== STATUS.REVIEW) throw httpError(409, '只有待审核的卡片可以标记完成')
     card.doneAt = Date.now()
     touch(card, 'done')
@@ -880,6 +897,20 @@ export function apply(ctx, config) {
     if (req.method === 'GET' && path === `${PREFIX}/board`) {
       reconcile()
       sendJson(res, 200, boardPayload())
+      return true
+    }
+
+    // 会话页标题栏用：这个会话对应哪张卡片（不是看板卡片就返回 null）。
+    // 只回一张卡，避免每开一个会话都把整块看板传一遍。
+    if (req.method === 'GET' && path === `${PREFIX}/card`) {
+      const sessionId = url.searchParams.get('sessionId') || ''
+      if (!sessionId) {
+        sendJson(res, 400, { ok: false, error: '缺少 sessionId' })
+        return true
+      }
+      reconcile()
+      const card = cardBySession(sessionId)
+      sendJson(res, 200, { ok: true, card: card ? viewOf(card) : null })
       return true
     }
 

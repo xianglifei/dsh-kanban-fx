@@ -59,8 +59,8 @@ window.__ModuleLoader__.load({
         id: 'review',
         zh: '待审核',
         en: 'Review',
-        hintZh: '跑完的卡片会落到这里。点开进会话看结果，满意就点「完成」。',
-        hintEn: 'Finished runs land here. Open the conversation, then mark done.',
+        hintZh: '跑完的卡片会落到这里。点开进会话看结果，看板上或会话标题栏都能点「完成」。',
+        hintEn: 'Finished runs land here. Open the conversation to review, then mark done from the card or the session header.',
       },
       {
         id: 'done',
@@ -83,6 +83,38 @@ window.__ModuleLoader__.load({
       return zhCache
     }
     const t = (cn, en) => (isZh() ? cn : en)
+
+    // ------------------------------------------- session header (card status)
+    // 会话 → 卡片的探测结果：命中先画、再后台刷新，切回会话时标题栏不会闪一下空。
+    const headerCardCache = new Map()
+    // 从会话标题栏点「完成」跳回看板时，交接给看板面板的一条提示（带撤销）。
+    let pendingBoardNotice = null
+
+    /** 一个 POST /kanban-fx/card 的薄封装：解析、校验、抛错，不碰看板状态。 */
+    async function postCardAction(action, payload) {
+      const response = await fetch(`${API}/card`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action, ...(payload || {}) }),
+      })
+      const body = await response.json().catch(() => null)
+      if (!response.ok || !body || body.ok !== true) {
+        const failure = new Error((body && body.error) || t(`操作失败（${response.status}）`, `Action failed (${response.status})`))
+        failure.status = response.status
+        throw failure
+      }
+      return body
+    }
+
+    /** 问 Host：这个会话对应哪张卡片；不是看板卡片就返回 null。 */
+    async function fetchSessionCard(sessionId) {
+      const response = await fetch(`${API}/card?sessionId=${encodeURIComponent(sessionId)}`, { cache: 'no-store' })
+      const body = await response.json().catch(() => null)
+      if (!response.ok || !body || body.ok !== true) {
+        throw new Error((body && body.error) || t(`状态读取失败（${response.status}）`, `Could not read the card (${response.status})`))
+      }
+      return body.card || null
+    }
 
     // ---------------------------------------------------------------- styles
     const CSS = `
@@ -524,6 +556,70 @@ window.__ModuleLoader__.load({
   .fxk-card:hover { transform: none; }
   .fxk-caret { transition: none; }
 }
+
+/* ------------------------------------------- session header (outside .fxk-root) */
+/* 标题栏挂在 .fxk-root 之外，拿不到 --fxk-*，这里自带一份 token 映射。
+   约定：圆点是状态，✓ 是动作——所以状态标不加底色，唯一的实心控件是「✓ 完成」。 */
+.fxk-hd {
+  --fxk-hd-text: var(--dsw-alias-label-primary, #0f1115);
+  --fxk-hd-text-2: var(--dsw-alias-label-secondary, #61666b);
+  --fxk-hd-text-3: var(--dsw-alias-label-tertiary, #81858c);
+  --fxk-hd-hover: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, .06));
+  --fxk-hd-border: var(--dsw-alias-border-l2, rgba(0, 0, 0, .1));
+  --fxk-hd-run: var(--dsw-alias-brand-primary, #0f1115);
+  --fxk-hd-review: var(--dsw-alias-state-warn-primary, #f59e0b);
+  --fxk-hd-done: var(--dsw-alias-state-success-primary, #22c55e);
+  --fxk-hd-err: var(--dsw-alias-state-error-primary, #ec1313);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+.fxk-hd-state {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 2px;
+  font-size: 12px; line-height: 22px;
+  color: var(--fxk-hd-text-3);
+  white-space: nowrap;
+}
+.fxk-hd-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--fxk-hd-text-3); flex: none; }
+.fxk-hd-state[data-state="running"] .fxk-hd-dot { background: var(--fxk-hd-run); }
+.fxk-hd-state[data-state="review"] .fxk-hd-dot { background: var(--fxk-hd-review); }
+.fxk-hd-state[data-state="done"] .fxk-hd-dot { background: var(--fxk-hd-done); }
+.fxk-hd-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 22px; padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--fxk-hd-done) 40%, var(--fxk-hd-border));
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--fxk-hd-done) 60%, var(--fxk-hd-text));
+  font: inherit; font-size: 12px; line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background .12s ease, border-color .12s ease;
+}
+.fxk-hd-btn:hover { background: color-mix(in srgb, var(--fxk-hd-done) 12%, transparent); }
+.fxk-hd-btn:focus-visible { outline: 2px solid color-mix(in srgb, var(--fxk-hd-done) 45%, transparent); outline-offset: 1px; }
+.fxk-hd-btn[disabled] { cursor: default; opacity: .72; }
+.fxk-hd-btn[data-tone="error"] {
+  border-color: color-mix(in srgb, var(--fxk-hd-err) 40%, var(--fxk-hd-border));
+  color: color-mix(in srgb, var(--fxk-hd-err) 70%, var(--fxk-hd-text));
+}
+.fxk-hd-btn[data-tone="error"]:hover { background: color-mix(in srgb, var(--fxk-hd-err) 10%, transparent); }
+.fxk-hd-btn[data-tone="board"] { border-color: var(--fxk-hd-border); color: var(--fxk-hd-text-2); }
+.fxk-hd-btn[data-tone="board"]:hover { background: var(--fxk-hd-hover); color: var(--fxk-hd-text); }
+
+/* 窄标题栏：状态只留圆点。文字不 display:none，而是收成 1px 的屏读文本，
+   这样读屏仍然能读到「进行中 / 待审核 / 已完成」，按钮优先保留。 */
+@container (max-width: 620px) {
+  .fxk-hd-label {
+    position: absolute; width: 1px; height: 1px;
+    margin: -1px; padding: 0; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap; border: 0;
+  }
+  .fxk-hd-state { padding: 0; }
+}
 `
 
     function ensureStyles() {
@@ -778,17 +874,7 @@ window.__ModuleLoader__.load({
 
       const post = useCallback(
         async (action, payload, options) => {
-          const response = await fetch(`${API}/card`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ action, ...(payload || {}) }),
-          })
-          const body = await response.json().catch(() => null)
-          if (!response.ok || !body || body.ok !== true) {
-            const failure = new Error((body && body.error) || t(`操作失败（${response.status}）`, `Action failed (${response.status})`))
-            failure.status = response.status
-            throw failure
-          }
+          const body = await postCardAction(action, payload)
           applyBoard(body)
           if (!(options && options.silent)) setError('')
           return body
@@ -889,6 +975,21 @@ window.__ModuleLoader__.load({
       const notify = useCallback((next) => {
         setToast(next ? { kind: 'info', ...next, at: Date.now() } : null)
       }, [])
+
+      // 从会话标题栏点「完成」跳回来时，接住那条提示（带撤销）。
+      // 读一次就清掉：面板重新挂载时不会重复弹。
+      useEffect(() => {
+        const notice = pendingBoardNotice
+        if (!notice) return
+        pendingBoardNotice = null
+        const label = notice.seq ? `fx-${notice.seq}` : notice.title || t('这张卡片', 'the card')
+        notify({
+          text: t(`已把 ${label} 移到已完成`, `Moved ${label} to done`),
+          undo: () => {
+            void post('undone', { id: notice.cardId }).catch((failure) => notify({ kind: 'error', text: String(failure?.message ?? failure) }))
+          },
+        })
+      }, [notify, post])
 
       const openCreate = useCallback(() => setModal({ mode: 'create', card: null }), [])
 
@@ -1973,6 +2074,191 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // ---------------------------------------- 会话页标题栏：卡片状态 + 完成
+    const HEADER_STATE = {
+      running: {
+        zh: '进行中',
+        en: 'Running',
+        hintZh: '会话正在跑，跑完会落到待审核',
+        hintEn: 'The run is in progress and lands in review when it finishes',
+      },
+      review: {
+        zh: '待审核',
+        en: 'In review',
+        hintZh: '这一轮已经跑完，可以标记完成',
+        hintEn: 'This run has finished — you can mark it done',
+      },
+      done: {
+        zh: '已完成',
+        en: 'Done',
+        hintZh: '已在任务看板标记完成',
+        hintEn: 'Marked done on the task board',
+      },
+    }
+
+    /**
+     * 会话标题栏里的「卡片状态 + 完成」。
+     *
+     * 只对看板卡片开的会话出现。状态优先用会话的实时 running：
+     * 用户在已完成 / 待审核的会话里继续说话，turn/start 一响就立刻回到「进行中」，
+     * 「完成」按钮同时消失；这一轮跑完再问一次 Host，落到待审核或已完成。
+     */
+    function HeaderCardState({ sessionId, useSession }) {
+      const [card, setCard] = useState(() => (headerCardCache.has(sessionId) ? headerCardCache.get(sessionId) : undefined))
+      // idle | busy | failed | board
+      const [phase, setPhase] = useState('idle')
+      const [failure, setFailure] = useState('')
+      const running = useSession((snapshot) => snapshot.running)
+      const alive = useRef(true)
+      const wasRunning = useRef(running)
+
+      const load = useCallback(async () => {
+        try {
+          const next = await fetchSessionCard(sessionId)
+          headerCardCache.set(sessionId, next)
+          if (alive.current) setCard(next)
+        } catch (error) {
+          console.error('[kanban-fx] 读取卡片状态失败：', error?.message ?? error)
+        }
+      }, [sessionId])
+
+      useEffect(() => {
+        alive.current = true
+        setCard(headerCardCache.has(sessionId) ? headerCardCache.get(sessionId) : undefined)
+        setPhase('idle')
+        void load()
+        return () => {
+          alive.current = false
+        }
+      }, [sessionId, load])
+
+      // 这一轮结束（running true → false）：重新问一次 Host，可能已经在别处被标完成。
+      // running 变 true 说明 Host 的 turn/start 已经清掉了 doneAt：本地先把「已完成」
+      // 降回待审核，避免这一轮跑完后、探测回来前闪一下「已完成」。
+      useEffect(() => {
+        if (running && card && card.sessionId === sessionId && card.status === 'done') {
+          const next = { ...card, status: 'review', doneAt: null }
+          headerCardCache.set(sessionId, next)
+          setCard(next)
+        }
+        if (wasRunning.current && !running) void load()
+        wasRunning.current = running
+      }, [running, card, sessionId, load])
+
+      if (card === undefined || card === null || card.sessionArchived) return null
+
+      const state = running ? 'running' : card.status === 'done' ? 'done' : 'review'
+      const meta = HEADER_STATE[state]
+
+      const openBoard = (workspaceId) => {
+        const layout = pluginCtx?.get('layout')
+        if (!layout || typeof layout.selectPanel !== 'function') {
+          throw new Error(t('当前 DSH 版本无法打开任务看板', 'This DSH version cannot open the task board'))
+        }
+        if (workspaceId) persistViewWorkspace(workspaceId)
+        // 面板是切 key 后重新挂载的，提示在挂载时消费；跳转失败就清掉，不留陈年提示
+        const notice = { cardId: card.id, seq: card.seq, title: card.title }
+        pendingBoardNotice = notice
+        try {
+          layout.selectPanel('kanban-fx')
+        } catch (error) {
+          if (pendingBoardNotice === notice) pendingBoardNotice = null
+          throw error
+        }
+      }
+
+      const complete = async () => {
+        if (phase === 'busy') return
+        setPhase('busy')
+        setFailure('')
+        let body = null
+        try {
+          body = await postCardAction('done', { sessionId })
+        } catch (error) {
+          if (!alive.current) return
+          setPhase('failed')
+          setFailure(String(error?.message ?? error))
+          window.setTimeout(() => {
+            if (alive.current) setPhase((current) => (current === 'failed' ? 'idle' : current))
+          }, 5000)
+          // 状态可能已经变了（比如又开跑了）：让标签自己说实话
+          void load()
+          return
+        }
+        const updated = (body && body.card) || { ...card, status: 'done', doneAt: Date.now() }
+        headerCardCache.set(sessionId, updated)
+        if (!alive.current) return
+        setCard(updated)
+        setPhase('idle')
+        // 看板记忆的工作区跟着卡片走，回到看板就能直接看见这张卡
+        const workspaces = Array.isArray(body && body.workspaces) ? body.workspaces : []
+        const workspaceId = workspaces.some((item) => item.id === updated.workspaceId) ? updated.workspaceId : null
+        try {
+          openBoard(workspaceId)
+        } catch (error) {
+          // 已经标好了，只是没跳过去：留一个「打开看板」的按钮兜底
+          setFailure(String(error?.message ?? error))
+          setPhase('board')
+        }
+      }
+
+      const openBoardAgain = () => {
+        try {
+          openBoard(card.workspaceId || null)
+        } catch (error) {
+          setFailure(String(error?.message ?? error))
+        }
+      }
+
+      const doneHint = card.seq
+        ? t(`标记为已完成，回到任务看板（fx-${card.seq}）`, `Mark as done and return to the task board (fx-${card.seq})`)
+        : t('标记为已完成，回到任务看板', 'Mark as done and return to the task board')
+
+      const button =
+        phase === 'board'
+          ? h(
+              'button',
+              {
+                type: 'button',
+                className: 'fxk-hd-btn',
+                'data-tone': 'board',
+                title: failure || t('回到任务看板', 'Back to the task board'),
+                onClick: openBoardAgain,
+              },
+              t('打开看板', 'Open board'),
+            )
+          : state === 'review'
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'fxk-hd-btn',
+                  'data-tone': phase === 'failed' ? 'error' : undefined,
+                  disabled: phase === 'busy',
+                  title: phase === 'failed' ? failure || t('标记失败，点击重试', 'Could not mark it done — click to retry') : doneHint,
+                  onClick: () => void complete(),
+                },
+                phase === 'busy'
+                  ? t('标记中…', 'Marking…')
+                  : phase === 'failed'
+                    ? t('标记失败', 'Retry')
+                    : t('✓ 完成', '✓ Mark done'),
+              )
+            : null
+
+      return h(
+        'span',
+        { className: 'fxk-hd' },
+        h(
+          'span',
+          { className: 'fxk-hd-state', 'data-state': state, title: t(meta.hintZh, meta.hintEn) },
+          h('span', { className: 'fxk-hd-dot', 'aria-hidden': 'true' }),
+          h('span', { className: 'fxk-hd-label' }, t(meta.zh, meta.en)),
+        ),
+        button,
+      )
+    }
+
     // ------------------------------------------------------------------ apply
     // 单个注册点失败不能拖垮整个客户端入口：DSH 认为必需入口未激活时会整体中断 web boot。
     function contribute(ctx, declaration, component, what) {
@@ -2000,6 +2286,25 @@ window.__ModuleLoader__.load({
         }
         contribute(ctx, { name: 'sidebar.panellist', id: 'kanban-fx', order: 30, label: () => t('任务看板', 'Task board') }, IconKanban, '侧边栏入口')
         contribute(ctx, { name: 'main', key: 'kanban-fx' }, Panel, '看板主面板')
+        // 会话标题栏：卡片状态 + 完成。槽位由对话包声明，显式用 inject 等它就位；
+        // 这里注册失败只丢这一处按钮，不能拖垮整个客户端入口。
+        try {
+          if (typeof ctx.slots.inject === 'function') {
+            ctx.slots.inject('conversation.session.header.actions', () => {
+              try {
+                return ctx.slots.register(
+                  { name: 'conversation.session.header.actions', id: 'kanban-card', order: 0 },
+                  HeaderCardState,
+                )
+              } catch (failure) {
+                console.error('[kanban-fx] 注册会话标题栏完成按钮失败：', failure)
+                return undefined
+              }
+            })
+          }
+        } catch (failure) {
+          console.error('[kanban-fx] 订阅会话标题栏失败：', failure)
+        }
       },
     }
   },
