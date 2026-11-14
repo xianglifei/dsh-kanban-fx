@@ -20,6 +20,7 @@ import { join } from 'node:path'
 const PREFIX = '/kanban-fx'
 const STORE_VERSION = 1
 const SSE_MAX_CLIENTS = 8
+const SSE_HEARTBEAT_MS = 25_000
 const BODY_LIMIT_BYTES = 40 * 1024 * 1024
 
 const DEFAULTS = {
@@ -189,6 +190,8 @@ export function apply(ctx, config) {
   const store = loadStore(storeFile)
 
   const sseClients = new Set()
+  /** response → 心跳计时器，连接断开 / 插件卸载时一起清掉。 */
+  const beats = new Map()
   let saveTimer = null
   let persistPending = false
   let rev = Number(store.rev) || 1
@@ -237,8 +240,16 @@ export function apply(ctx, config) {
     try {
       response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     } catch {
+      stopBeat(response)
       sseClients.delete(response)
     }
+  }
+
+  function stopBeat(response) {
+    const timer = beats.get(response)
+    if (!timer) return
+    clearInterval(timer)
+    beats.delete(response)
   }
 
   /** 有变化才推：客户端收到 rev 后自己去读 /board。 */
@@ -790,11 +801,21 @@ export function apply(ctx, config) {
       sseClients.add(res)
       sseSend(res, 'rev', { rev, reason: 'hello' })
       const drop = () => {
+        stopBeat(res)
         sseClients.delete(res)
         try {
           res.end()
         } catch {}
       }
+      // 心跳：让客户端能区分「真的没变化」和「连接其实已经死了」。
+      // EventSource 在 429 / 非 200 之后按规范不再重连，只看 onerror 是发现不了的。
+      beats.set(
+        res,
+        setInterval(() => {
+          if (res.writableEnded) return drop()
+          sseSend(res, 'beat', { at: Date.now() })
+        }, SSE_HEARTBEAT_MS),
+      )
       req.on('close', drop)
       req.on('error', drop)
       res.on('close', drop)
@@ -885,6 +906,7 @@ export function apply(ctx, config) {
       clearTimeout(boot)
       clearInterval(timer)
       for (const client of sseClients) {
+        stopBeat(client)
         try {
           client.end()
         } catch {}
@@ -897,6 +919,7 @@ export function apply(ctx, config) {
 
   ctx.effect(() => () => {
     for (const client of sseClients) {
+      stopBeat(client)
       try {
         client.end()
       } catch {}

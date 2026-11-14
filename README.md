@@ -23,7 +23,9 @@ DeepSeek Harness（DSH）Web 插件的任务看板：侧边栏一个入口，四
 数据新鲜度靠这三层保证：
 
 - **变化推送**：Host 每次改卡片都通过 SSE 推一个 `rev`，页面收到就静默重读，正常是秒级；
-- **兜底轮询**：15 秒一次静默重读；窗口重新获得焦点时也读一次。
+- **兜底轮询**：15 秒一次静默重读；窗口重新获得焦点时也读一次；
+- **心跳**：Host 每 25 秒推一帧 `beat`，页面 70 秒收不到任何一帧就重建订阅并补读一次，
+  防止连接半死（例如订阅超过 8 条被 429 拒掉）之后页面一直停在旧数据。
 
 「新建待办」保留两个入口，可以并行使用：
 
@@ -132,7 +134,7 @@ dsh plugin --profile desktop add link:/Users/xianglifei/Code/Github/dsh-kanban-f
 | 方法与路径 | 用途 |
 |---|---|
 | `GET /kanban-fx/board` | 看板快照（卡片、工作区、默认工作区 = 校验过的 `lastWorkspaceId`、`rev`、`serverNow`） |
-| `GET /kanban-fx/events` | SSE，只推 `rev`；客户端收到后自己重读 `/board` |
+| `GET /kanban-fx/events` | SSE：有变化推 `rev`（25 秒没变化也会推 `beat` 心跳）；客户端收到 `rev` 后自己重读 `/board` |
 | `GET /kanban-fx/attachment?id=` | 卡片附件的原图 / 原文件 |
 | `POST /kanban-fx/card` | `{action: create \| update \| delete \| run \| done \| undone, ...}` |
 

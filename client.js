@@ -749,19 +749,46 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         void load()
         let source = null
-        try {
-          source = new EventSource(`${API}/events`)
+        let lastFrameAt = Date.now()
+        let disposed = false
+        /** 重建订阅：网络断开 EventSource 会自己重连，但 429 / 非 200 之后按规范不再重连。 */
+        const connect = () => {
+          try {
+            source = new EventSource(`${API}/events`)
+          } catch (failure) {
+            source = null
+            console.error('[kanban-fx] 变化订阅不可用：', failure)
+            return
+          }
           source.addEventListener('rev', () => {
+            lastFrameAt = Date.now()
             void load({ quiet: true })
           })
-        } catch (failure) {
-          console.error('[kanban-fx] 变化订阅不可用：', failure)
+          // 心跳帧只说明通道还活着，不改任何状态
+          source.addEventListener('beat', () => {
+            lastFrameAt = Date.now()
+          })
         }
+        connect()
+        // 看门狗：心跳 25 秒一次，70 秒一帧都没有就当通道已经半死，重建订阅并补读一次
+        const watchdog = setInterval(() => {
+          if (disposed || Date.now() - lastFrameAt < 70_000) return
+          lastFrameAt = Date.now()
+          try {
+            if (source) source.close()
+          } catch {}
+          connect()
+          void load({ quiet: true })
+        }, 15_000)
         const fallback = setInterval(() => void load({ quiet: true }), 15_000)
         const onFocus = () => void load({ quiet: true })
         window.addEventListener('focus', onFocus)
         return () => {
-          if (source) source.close()
+          disposed = true
+          try {
+            if (source) source.close()
+          } catch {}
+          clearInterval(watchdog)
           clearInterval(fallback)
           window.removeEventListener('focus', onFocus)
         }
