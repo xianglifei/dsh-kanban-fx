@@ -166,7 +166,9 @@ window.__ModuleLoader__.load({
 .fxk-head-spacer { flex: 1; min-width: 4px; }
 /* 右上角是「看板的工作区」切换器，不是筛选器：给个显式标签，免得和侧边栏混淆 */
 .fxk-filter { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.fxk-filter-label { font-size: 11.5px; color: var(--fxk-text-3); white-space: nowrap; }
+/* 比下拉里的字大半级（12.5 vs 12）+ 字重 560 + 二级色：11.5px 的三级灰贴着 30px 高的下拉，
+   会被读成一条注脚而不是字段名。 */
+.fxk-filter-label { font-size: 12.5px; line-height: 20px; font-weight: 560; color: var(--fxk-text-2); white-space: nowrap; }
 /* 侧栏里的撑杆不复用 header 的，因为窄屏会隐藏 header 的那一个 */
 .fxk-sheet-spacer { flex: 1; min-width: 4px; }
 .fxk-select {
