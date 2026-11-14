@@ -35,6 +35,9 @@
   fallback、忙 409、投递回滚、reconcile 超时、重复点击、设置校验、`lastRunMs` 不被收尾覆盖）；
   Client 用真实 React + JSDOM 挂载 Panel / Header（齿轮、设置页、radio / textarea、保存、列表「收尾中」、
   标题栏 tooltip 与跳回看板）。新增设置页浅色 / 深色 / 窄屏与「收尾中」卡片浅色 / 深色共 5 张自查图（假数据），README 已引用；旧的看板 / 列表截图保持原样。
+- 升级提示：从 0.4.x 升到 0.5.0 后要重载任务看板插件（或在 DSH 里禁用再启用 / 重启 DSH）才会加载
+  新的 Host `/settings` 路由；只刷新页面只会更新 Client，点保存会落到旧 Host 的 404「接口不存在」。
+  看板数据不受影响；重载可能刷新面板，保存前先把草稿复制出来。
 - 版本升到 0.5.0（新能力，minor）；`README` / `locale` / `package.json` 同步。
 
 ## 0.4.0 — 2026-11-14

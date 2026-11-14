@@ -172,6 +172,11 @@ dsh plugin --profile desktop add link:/Users/xianglifei/Code/Github/dsh-kanban-f
 
 或在 DSH 的 **Plugins → Add plugin** 里选择本目录。装好后侧边栏出现「任务看板」图标。
 
+> **升级提示**：任务看板分 Host（`index.js`，负责设置 / 存储 / 状态机）和 Client（`client.js`，负责页面）两半。
+> 从 0.4.x 升到 0.5.0 后，刷新页面只会换 Client；运行中的 Host 仍是旧代码，点保存会得到「接口不存在」。
+> 在 DSH 里把「任务看板」插件禁用再启用（或重启 DSH）才会加载新的 Host；看板数据不受影响。
+> 重载可能刷新面板，保存前先把设置页里的草稿复制出来，重载后粘贴回去再保存。
+
 ## 状态规则
 
 | 状态 | 判定 |
