@@ -287,17 +287,6 @@ window.__ModuleLoader__.load({
 .fxk-btn-danger { color: var(--fxk-err); }
 .fxk-btn-danger:hover { background: color-mix(in srgb, var(--fxk-err) 10%, transparent); }
 .fxk-btn-icon { width: 30px; padding: 0; }
-/* 标题旁的图标刷新：只是「立刻重读一次」的兜底，不跟工作区切换器抢位置 */
-.fxk-sync {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; flex: none; padding: 0; margin-left: 1px;
-  border: 0; border-radius: 6px;
-  background: transparent; color: var(--fxk-text-3);
-  cursor: pointer;
-}
-.fxk-sync:hover { background: var(--fxk-hover); color: var(--fxk-text); }
-.fxk-sync:active { color: var(--fxk-text-2); }
-.fxk-sync:focus-visible { outline: 2px solid color-mix(in srgb, var(--fxk-brand) 55%, transparent); outline-offset: 1px; }
 
 /* 视图切换：紧跟着页面标题，属于「这页是什么」，不和右侧的工作区 / 新建混在一组。
    两段式小控件，当前段浮起来；窄到 380px 以下只剩图标（aria-label 仍在）。 */
@@ -968,35 +957,6 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** 循环箭头（Lucide rotate-cw，24 网格）：标题旁那个「立刻重读一次」的小按钮。 */
-    function IconRefresh(props) {
-      const size = props && Number(props.size) > 0 ? Number(props.size) : 16
-      return h(
-        'svg',
-        {
-          width: size,
-          height: size,
-          viewBox: '0 0 24 24',
-          fill: 'none',
-          'aria-hidden': true,
-          style: { display: 'block' },
-        },
-        h('path', {
-          d: 'M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8',
-          stroke: 'currentColor',
-          strokeWidth: 2,
-          strokeLinecap: 'round',
-        }),
-        h('path', {
-          d: 'M21 3v5h-5',
-          stroke: 'currentColor',
-          strokeWidth: 2,
-          strokeLinecap: 'round',
-          strokeLinejoin: 'round',
-        }),
-      )
-    }
-
     // ---------------------------------------------------------------- utils
     function formatElapsed(ms) {
       const total = Math.max(0, Math.floor(ms / 1000))
@@ -1193,7 +1153,6 @@ window.__ModuleLoader__.load({
       const [toast, setToast] = useState(null)
       // 「已完成」列默认折叠成标题行；只有用户点开的那几张会展开，状态只活在这个面板里。
       const [expandedDone, setExpandedDone] = useState(() => new Set())
-      const [syncedAt, setSyncedAt] = useState(0)
       const [now, setNow] = useState(() => Date.now())
       const skewRef = useRef(0)
 
@@ -1205,7 +1164,6 @@ window.__ModuleLoader__.load({
           workspaces: Array.isArray(payload.workspaces) ? payload.workspaces : [],
           defaultWorkspaceId: payload.defaultWorkspaceId || null,
         })
-        setSyncedAt(Date.now())
         setError('')
       }, [])
 
@@ -1273,8 +1231,14 @@ window.__ModuleLoader__.load({
           void load({ quiet: true })
         }, 15_000)
         const fallback = setInterval(() => void load({ quiet: true }), 15_000)
+        // 回到前台就读一次。focus 在切标签页 / iframe 里不一定触发，用 visibilitychange 兜住；
+        // 手动刷新按钮去掉后，这两条就是「回到页面立刻看到新数据」的兜底。
         const onFocus = () => void load({ quiet: true })
+        const onVisible = () => {
+          if (document.visibilityState === 'visible') void load({ quiet: true })
+        }
         window.addEventListener('focus', onFocus)
+        document.addEventListener('visibilitychange', onVisible)
         return () => {
           disposed = true
           try {
@@ -1283,6 +1247,7 @@ window.__ModuleLoader__.load({
           clearInterval(watchdog)
           clearInterval(fallback)
           window.removeEventListener('focus', onFocus)
+          document.removeEventListener('visibilitychange', onVisible)
         }
       }, [load])
 
@@ -1998,19 +1963,6 @@ window.__ModuleLoader__.load({
             { className: 'fxk-brand' },
             h('span', { className: 'fxk-brand-mark' }, h(IconKanban, { size: 16, active: true })),
             h('span', { className: 'fxk-brand-title' }, t('任务看板', 'Task board')),
-            h(
-              'button',
-              {
-                type: 'button',
-                className: 'fxk-sync',
-                title: syncedAt
-                  ? t(`立即刷新（上次同步 ${clockOf(syncedAt)}）`, `Refresh now (last synced ${clockOf(syncedAt)})`)
-                  : t('立即刷新', 'Refresh now'),
-                'aria-label': t('刷新看板', 'Refresh board'),
-                onClick: () => void load(),
-              },
-              h(IconRefresh, { size: 15 }),
-            ),
             h(
               'div',
               { className: 'fxk-viewswitch', role: 'group', 'aria-label': t('视图', 'View') },
