@@ -1,6 +1,6 @@
 {
   "name": "dsh-kanban-fx",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "type": "module",
   "description": "任务看板：待办 / 进行中 / 待审核 / 已完成，点执行即开会话开始跑",

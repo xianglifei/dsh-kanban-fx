@@ -4,7 +4,8 @@
  * 职责：
  * - 持久化卡片（待办 / 进行中 / 待审核 / 已完成），数据落在 $DSH_HOME/dsh-kanban-fx/board.json
  * - 通过 ctx.webServer 暴露看板 HTTP 接口给 Client 半
- * - 「执行」：建（或复用）会话 → 把卡片正文与附件作为一条 user 消息投进去 → 立刻开跑
+ * - 「执行」：建（或复用）会话 → 把卡片内容作为一条 user 消息投进去 → 立刻开跑
+ *   （首条消息 = 手写标题作第一行 + 正文原样；没写标题时只发正文）
  * - 状态机：由会话本身的事件推导（turn/start → 进行中，turn/end → 待审核），
  *   只有「已完成」是用户手点的标记；用户在会话里再发消息会自动回到进行中
  *
@@ -18,7 +19,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 const PREFIX = '/kanban-fx'
-const STORE_VERSION = 1
+// v2：card.title 从「展示标题」改为「用户手写的标题」（空串 = 自动取正文首行）
+const STORE_VERSION = 2
 const SSE_MAX_CLIENTS = 8
 const SSE_HEARTBEAT_MS = 25_000
 const BODY_LIMIT_BYTES = 40 * 1024 * 1024
@@ -57,16 +59,99 @@ function base64ToBytes(data) {
   return new Uint8Array(buffer)
 }
 
-/** 卡片标题：显式标题 → 正文首行 → 附件占位。 */
-function deriveTitle(title, body) {
-  const given = textOf(title, 80).trim()
+const TITLE_MAX_CHARS = 42
+
+/** 用户手写的标题：压成单行。空串表示「没写标题」，展示标题再按正文首行派生。 */
+function titleOf(value) {
+  return textOf(value, 80)
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** 派生标题用：剥掉行首的 markdown 记号（#、列表、引用、围栏）与成对强调记号。 */
+function titleLineOf(line) {
+  let value = String(line ?? '').trim()
+  for (let round = 0; round < 3; round += 1) {
+    const before = value
+    value = value
+      .replace(/^#{1,6}\s*/, '')
+      .replace(/^[-*+>]\s+/, '')
+      .replace(/^\d{1,2}[.)、]\s*/, '')
+      .replace(/^```[\w-]*\s*/, '')
+      .trim()
+    const paired = value.match(/^(\*\*|__|`)(.+?)\1$/)
+    if (paired) value = paired[2].trim()
+    if (value === before) break
+  }
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+/** 正文里第一个能当标题的行：跳过空行与 `---` / `***` 这类分隔线。 */
+function firstTitleLine(body) {
+  for (const line of textOf(body, 4000).split('\n')) {
+    if (/^\s*[-*_=]{3,}\s*$/.test(line)) continue
+    const value = titleLineOf(line)
+    if (value) return value
+  }
+  return ''
+}
+
+/** 标题截断：优先落在句读 / 空格边界，别把一句话切成半个词。 */
+function clipTitle(text, max = TITLE_MAX_CHARS) {
+  const chars = Array.from(text)
+  const head = chars.length > max ? chars.slice(0, max).join('') : text
+  let cut = head
+  if (chars.length > max) {
+    let lastMark = -1
+    for (const mark of ['。', '！', '？', '；', '.', '!', '?', ';']) {
+      lastMark = Math.max(lastMark, head.lastIndexOf(mark))
+    }
+    if (lastMark >= Math.floor(max / 2)) {
+      cut = head.slice(0, lastMark + 1)
+    } else {
+      const lastBreak = Math.max(head.lastIndexOf(' '), head.lastIndexOf('，'), head.lastIndexOf(','), head.lastIndexOf('、'))
+      if (lastBreak >= Math.floor(max / 2)) cut = head.slice(0, lastBreak)
+    }
+  }
+  return cut.replace(/[。．.!！?？;；,，、：:\s]+$/, '').trim()
+}
+
+/**
+ * 卡片的展示标题：手写标题 → 正文首行 → 单个附件的文件名 → 未命名事项。
+ * 只用于卡片和会话名，不参与首条消息（消息里只发用户手写的那份标题）。
+ */
+function deriveTitle(title, body, attachments) {
+  const given = titleOf(title)
   if (given) return given
+  const line = firstTitleLine(body)
+  if (line) return clipTitle(line)
+  const attachmentName =
+    Array.isArray(attachments) && attachments.length === 1 ? textOf(attachments[0] && attachments[0].name, 80).trim() : ''
+  if (attachmentName) return clipTitle(attachmentName)
+  return '未命名事项'
+}
+
+/** 旧版（v1）的派生规则：迁移时用来判断某个 title 当年是不是自动取的。 */
+function legacyDerivedTitle(body) {
   const firstLine = textOf(body, 4000)
     .split('\n')
     .map((line) => line.trim())
     .find((line) => line.length > 0)
-  if (firstLine) return firstLine.slice(0, 42)
-  return '未命名事项'
+  return firstLine ? firstLine.slice(0, 42) : '未命名事项'
+}
+
+/**
+ * 首条消息里的文本：手写标题作第一行（`# 标题`），正文原样跟在后面。
+ * 没写标题时只发正文；正文首行已经是同一句标题时不重复。
+ */
+function messageTextOf(card) {
+  const body = (card.body || '').trim()
+  const heading = titleLineOf(card.title || '')
+  if (!body) return heading
+  if (!heading) return body
+  const first = firstTitleLine(body)
+  if (first && first.toLowerCase() === heading.toLowerCase()) return body
+  return `# ${heading}\n\n${body}`
 }
 
 function statusOf(card) {
@@ -89,10 +174,14 @@ function normalizeSettings(config) {
 
 /** 一张卡片对外（Client）的形状：不含附件字节。 */
 function viewOf(card) {
+  const title = deriveTitle(card.title, card.body, card.attachments)
   return {
     id: card.id,
     seq: Number.isInteger(card.seq) && card.seq > 0 ? card.seq : null,
-    title: card.title,
+    // title 是展示标题（手写 → 正文首行 → 附件名），titleInput 才是用户亲手写的那份
+    title,
+    titleInput: card.title || '',
+    titleDerived: !(card.title || '').trim(),
     body: card.body,
     workspaceId: card.workspaceId,
     attachments: card.attachments.map((attachment) => ({
@@ -128,13 +217,21 @@ function loadStore(file) {
     const parsed = JSON.parse(readFileSync(file, 'utf8'))
     if (!parsed || typeof parsed !== 'object' || !parsed.cards || typeof parsed.cards !== 'object') return emptyStore()
     const cards = {}
+    // v1 的 title 存的是「展示标题」（可能是自动取的正文首行），v2 起只存手写标题。
+    const fromVersion = Number(parsed.version) || 1
     for (const [id, card] of Object.entries(parsed.cards)) {
       if (!card || typeof card !== 'object') continue
+      const body = typeof card.body === 'string' ? card.body : ''
+      const storedTitle = textOf(card.title, 120).trim()
+      // 老数据里 title 和老派生规则一致（或就是占位名）→ 当年没手写，迁成空串继续自动派生
+      const autoTitle =
+        fromVersion < STORE_VERSION &&
+        (!storedTitle || storedTitle === legacyDerivedTitle(body) || storedTitle === '未命名事项')
       cards[id] = {
         id,
         seq: null,
-        title: textOf(card.title, 120) || '未命名事项',
-        body: typeof card.body === 'string' ? card.body : '',
+        title: autoTitle ? '' : storedTitle,
+        body,
         workspaceId: typeof card.workspaceId === 'string' && card.workspaceId ? card.workspaceId : null,
         attachments: Array.isArray(card.attachments) ? card.attachments.filter((item) => item && typeof item.id === 'string') : [],
         sessionId: typeof card.sessionId === 'string' && card.sessionId ? card.sessionId : null,
@@ -171,7 +268,8 @@ function loadStore(file) {
     }
     const storedNext = Number(parsed.nextSeq)
     return {
-      version: Number(parsed.version) || STORE_VERSION,
+      // 迁移过的 v1 标记成 2；不把更高版本的文件降级，免得旧代码悄悄改坏新数据
+      version: Math.max(fromVersion, STORE_VERSION),
       rev: Number(parsed.rev) || 1,
       nextSeq: Number.isInteger(storedNext) && storedNext > highest + 1 ? storedNext : highest + 1,
       lastWorkspaceId: typeof parsed.lastWorkspaceId === 'string' ? parsed.lastWorkspaceId : null,
@@ -360,12 +458,11 @@ export function apply(ctx, config) {
     return out
   }
 
-  /** 卡片正文 + 附件 → DSH 原生内容块（与新会话输入框产出的类型一致）。 */
+  /** 卡片内容 + 附件 → DSH 原生内容块（与新会话输入框产出的类型一致）。 */
   async function contentOf(card) {
     const parts = []
-    const text = (card.body || '').trim()
+    const text = messageTextOf(card)
     if (text) parts.push({ type: 'text', text })
-    else if ((card.title || '').trim()) parts.push({ type: 'text', text: card.title.trim() })
     for (const attachment of card.attachments) {
       if (attachment.kind === 'image' && attachment.mediaType && attachment.width && attachment.height) {
         parts.push({
@@ -409,7 +506,7 @@ export function apply(ctx, config) {
     try {
       const current = titles.get(session)
       if (current && current.title && current.title.trim()) return
-      titles.rename(session, card.title)
+      titles.rename(session, deriveTitle(card.title, card.body, card.attachments))
     } catch (error) {
       console.error('[kanban-fx] 会话改名失败：', error?.message ?? error)
     }
@@ -533,7 +630,7 @@ export function apply(ctx, config) {
     const card = {
       id: `card-${randomUUID()}`,
       seq: allocateSeq(),
-      title: deriveTitle(input?.title, input?.body),
+      title: titleOf(input?.title),
       body: textOf(input?.body, settings.maxBodyChars),
       workspaceId: typeof input?.workspaceId === 'string' && input.workspaceId ? input.workspaceId : null,
       attachments,
@@ -561,7 +658,7 @@ export function apply(ctx, config) {
     if (!card) throw httpError(404, '卡片不存在')
     if (card.sessionId) throw httpError(409, '已经执行过的卡片不能再改内容（去会话里继续）')
     const attachments = await saveAttachments(input?.attachments)
-    card.title = deriveTitle(input?.title, input?.body)
+    card.title = titleOf(input?.title)
     card.body = textOf(input?.body, settings.maxBodyChars)
     card.workspaceId = typeof input?.workspaceId === 'string' && input.workspaceId ? input.workspaceId : null
     card.attachments = attachments

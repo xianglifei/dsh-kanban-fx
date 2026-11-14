@@ -637,6 +637,55 @@ window.__ModuleLoader__.load({
       return text.length > 220 ? `${text.slice(0, 220)}…` : text
     }
 
+    /**
+     * 标题留空时，「会话名会是什么」的实时预览。
+     * 规则和 Host 的 deriveTitle 保持一致（正文首行 → 单个附件的文件名）；
+     * 真正的展示标题始终以 Host 落库的为准，这里只是侧栏里的一句提示。
+     */
+    function titlePreviewOf(body, attachmentNames) {
+      const clean = (line) => {
+        let value = String(line || '').trim()
+        for (let round = 0; round < 3; round += 1) {
+          const before = value
+          value = value
+            .replace(/^#{1,6}\s*/, '')
+            .replace(/^[-*+>]\s+/, '')
+            .replace(/^\d{1,2}[.)、]\s*/, '')
+            .replace(/^```[\w-]*\s*/, '')
+            .trim()
+          const paired = value.match(/^(\*\*|__|`)(.+?)\1$/)
+          if (paired) value = paired[2].trim()
+          if (value === before) break
+        }
+        return value.replace(/\s+/g, ' ').trim()
+      }
+      const clip = (value) => {
+        const chars = Array.from(value)
+        if (chars.length <= 42) return value.replace(/[。．.!！?？;；,，、：:\s]+$/, '').trim()
+        const head = chars.slice(0, 42).join('')
+        let lastMark = -1
+        for (const mark of ['。', '！', '？', '；', '.', '!', '?', ';']) {
+          lastMark = Math.max(lastMark, head.lastIndexOf(mark))
+        }
+        let cut = head
+        if (lastMark >= 21) {
+          cut = head.slice(0, lastMark + 1)
+        } else {
+          const lastBreak = Math.max(head.lastIndexOf(' '), head.lastIndexOf('，'), head.lastIndexOf(','), head.lastIndexOf('、'))
+          if (lastBreak >= 21) cut = head.slice(0, lastBreak)
+        }
+        return cut.replace(/[。．.!！?？;；,，、：:\s]+$/, '').trim()
+      }
+      for (const line of String(body || '').slice(0, 4000).split('\n')) {
+        if (/^\s*[-*_=]{3,}\s*$/.test(line)) continue
+        const value = clean(line)
+        if (value) return clip(value)
+      }
+      const names = Array.isArray(attachmentNames) ? attachmentNames : []
+      if (names.length === 1) return clip(String(names[0] || ''))
+      return ''
+    }
+
     /** 卡片编号：对用户显示成 fx-1、fx-2……；还没落库的草稿没有编号。 */
     function cardSeqLabel(card) {
       const seq = Number(card && card.seq)
@@ -1392,7 +1441,8 @@ window.__ModuleLoader__.load({
     // ---------------------------------------------------------------- editor
     function Editor(props) {
       const { mode, card, workspaces, defaultWorkspaceId, post, notify, onSaved, onClose } = props
-      const [title, setTitle] = useState(card ? card.title : '')
+      // 只回填用户手写的标题；派生标题留空，由占位符和下面的会话名预览兜住
+      const [title, setTitle] = useState(card ? (typeof card.titleInput === 'string' ? card.titleInput : card.title) : '')
       const [body, setBody] = useState(card ? card.body : '')
       // 工作区必填：优先卡片自己的（校验它还在），否则用看板当前工作区。
       // 历史卡片没工作区、或工作区已被删时，打开编辑就顺手落到一个有效工作区。
@@ -1677,6 +1727,10 @@ window.__ModuleLoader__.load({
               : auto.kind === 'saved' && auto.at
                 ? t(`已自动保存 ${clockOf(auto.at)}`, `auto-saved ${clockOf(auto.at)}`)
                 : t('自动保存已开启', 'Auto-save on')
+      // 标题留空时，会话名取正文首行（没有正文就用单个附件名）；这里只是实时预览，落库的标题由 Host 派生
+      const autoName = title.trim()
+        ? ''
+        : titlePreviewOf(body, [...kept.map((item) => item.name), ...added.map((item) => item.name)])
 
       return h(
         'div',
@@ -1728,12 +1782,20 @@ window.__ModuleLoader__.load({
                 className: 'fxk-input',
                 autoFocus: Boolean(mode === 'create'),
                 value: title,
-                placeholder: t('比如：把看板插件的存储层写完', 'e.g. finish the board storage layer'),
+                placeholder: t('标题未填写', 'No title yet'),
                 onChange: (event) => {
                   setTitle(event.target.value)
                   markDirty()
                 },
               }),
+              // 留空时把「会话名会取什么」直接摆出来，省得用户猜正文首行会被怎么截
+              title.trim()
+                ? null
+                : h(
+                    'div',
+                    { className: 'fxk-hint' },
+                    t(`会话名：${autoName || '未命名事项'}`, `Conversation name: ${autoName || 'Untitled'}`),
+                  ),
             ),
             h(
               'div',
@@ -1757,7 +1819,7 @@ window.__ModuleLoader__.load({
                 h('textarea', {
                   className: 'fxk-textarea',
                   value: body,
-                  placeholder: t('写多少都行：背景、想法、可能的做法、验收标准……执行时会原样发给 DSH。', 'Anything: context, ideas, approach, acceptance criteria… sent verbatim when you run it.'),
+                  placeholder: t('写多少都行：背景、想法、可能的做法、验收标准……执行时正文会原样发出。', 'Anything: context, ideas, approach, acceptance criteria… sent verbatim when you run it.'),
                   onChange: (event) => {
                     setBody(event.target.value)
                     markDirty()
