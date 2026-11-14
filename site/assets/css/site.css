@@ -627,19 +627,17 @@ figure { margin: 0; }
 }
 .float-pill b { display: block; font-size: 11px; font-weight: 650; line-height: 1.3; }
 .float-pill small { display: block; margin-top: 1px; font-size: 9px; color: var(--ink-3); line-height: 1.3; }
-.float-ico, .float-check {
+.float-ico {
   width: 25px; height: 25px;
   border-radius: 8px;
   display: grid;
   place-items: center;
   flex: none;
+  background: var(--ink);
+  color: var(--bg);
 }
-.float-ico { background: var(--ink); color: var(--bg); }
 .float-ico .ic { width: 13px; height: 13px; }
-.float-check { background: var(--green-bg); color: var(--done); }
-.float-check .ic { width: 13px; height: 13px; }
 .float-pill-run { top: -44px; right: 4px; }
-.float-pill-done { bottom: -34px; left: -6px; animation-delay: -3.4s; }
 @keyframes floaty {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-7px); }
@@ -1686,7 +1684,6 @@ details[open] .faq-plus::after { transform: translate(-50%, -50%) rotate(0deg); 
   .mini-col:nth-child(3), .mini-col:nth-child(4) { display: none; }
   .board-window { border-radius: 14px; }
   .float-pill-run { top: -40px; right: 0; transform: scale(0.92); }
-  .float-pill-done { bottom: -30px; left: 0; transform: scale(0.92); }
   .section { padding: 72px 0; }
   .section-head { margin-bottom: 36px; }
   .section-head h2 { font-size: clamp(28px, 8vw, 36px); }

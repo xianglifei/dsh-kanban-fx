@@ -21,7 +21,7 @@ DeepSeek Harness（DSH）Web 插件的任务看板：侧边栏一个入口，每
 [xianglifei.github.io/dsh-kanban-fx](https://xianglifei.github.io/dsh-kanban-fx/) 是仓库的 GitHub Pages 官网：
 功能、流程、深浅色与窄屏截图、安装命令和常见问题都在这一页。源码在 [`site/`](site/)，纯静态
 HTML / CSS / JS，没有构建步骤；`site/` 的改动由 [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
-构建并发布。本地预览：
+构建并发布。首屏那张四列看板是 HTML / CSS 重绘的示意图，真实界面见画廊里的自查渲染图。本地预览：
 
 ```sh
 cd site && python3 -m http.server 4173

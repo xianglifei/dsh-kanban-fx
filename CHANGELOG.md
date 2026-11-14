@@ -43,6 +43,7 @@
   `site/**` 的改动由 `.github/workflows/pages.yml` 发布到 <https://xianglifei.github.io/dsh-kanban-fx/>，
   另带 `og.png`、`robots.txt`、`sitemap.xml`。README 增加官网入口与本地预览方式；插件代码、版本与
   `board.json` 均未变。
+- 官网首屏去掉左下角「已移入已完成」浮块，只留右上角「会话已开跑」；浮块压在卡片上会挡住内容。
 - 版本升到 0.5.0（新能力，minor）；`README` / `locale` / `package.json` 同步。
 
 ## 0.4.0 — 2026-11-14
