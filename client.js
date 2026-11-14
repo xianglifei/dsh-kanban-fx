@@ -320,27 +320,35 @@ window.__ModuleLoader__.load({
 .fxk-btn-icon { width: 30px; padding: 0; }
 
 /* 视图切换：紧跟着页面标题，属于「这页是什么」，不和右侧的工作区 / 新建混在一组。
-   两段式小控件，当前段浮起来；窄到 380px 以下只剩图标（aria-label 仍在）。 */
+   两段轻标签：没有轨道 / 白卡 / 阴影，当前项只靠 7% 软填充 + 600 字重；
+   非当前项用二级灰而不是三级灰，12px 下保住可读性。
+   窄到 360px 以下只剩图标（aria-label 仍在）。 */
 .fxk-viewswitch {
   display: inline-flex; align-items: center; gap: 2px; flex: none;
-  height: 28px; margin-left: 6px; padding: 2px;
-  border-radius: 8px; background: var(--fxk-hover);
+  height: 28px; margin-left: 8px; padding: 0;
 }
 .fxk-viewswitch button {
-  height: 24px; padding: 0 10px; border: 0; border-radius: 6px;
+  height: 26px; padding: 0 8px; border: 0; border-radius: 6px;
   background: transparent; color: var(--fxk-text-2);
   font-size: 12px; line-height: 1; font-weight: 500;
   display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
   cursor: pointer;
   transition: color 120ms, background 120ms;
 }
-.fxk-viewswitch button:hover { color: var(--fxk-text); }
+.fxk-viewswitch button:hover:not([data-active="true"]) {
+  color: var(--fxk-text);
+  background: color-mix(in srgb, var(--fxk-text) 4%, var(--fxk-canvas));
+}
 .fxk-viewswitch button[data-active="true"] {
-  background: var(--fxk-card); color: var(--fxk-text); font-weight: 560;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .08), 0 0 0 1px var(--fxk-border-soft);
+  background: color-mix(in srgb, var(--fxk-text) 7%, var(--fxk-canvas));
+  color: var(--fxk-text); font-weight: 600;
 }
 .fxk-viewswitch button:focus-visible { outline-offset: 1px; }
-.fxk-viewswitch svg { display: block; }
+.fxk-viewswitch svg {
+  display: block; width: 13px; height: 13px;
+  opacity: .7; transition: opacity 120ms;
+}
+.fxk-viewswitch button[data-active="true"] svg { opacity: 1; }
 .fxk-viewswitch-label { display: inline-block; }
 
 /* ----------------------------------------------------------------- board */
@@ -950,8 +958,7 @@ window.__ModuleLoader__.load({
   .fxk-settings-head { gap: 6px; }
   .fxk-back { width: 30px; padding: 0; justify-content: center; }
   .fxk-back-label { display: none; }
-  .fxk-viewswitch { margin-left: 2px; }
-  .fxk-viewswitch button { padding: 0 8px; }
+  .fxk-viewswitch { margin-left: 4px; }
   /* 保住「看板 / 列表」两个标签：顶部新建收成 +（表尾那条带文字的新建还在） */
   .fxk-head .fxk-btn { width: 30px; padding: 0; }
   .fxk-new-label { display: none; }
@@ -959,6 +966,8 @@ window.__ModuleLoader__.load({
 
 /* 再窄就只留图标，aria-label / title 还在 */
 @container (max-width: 360px) {
+  .fxk-viewswitch button { padding: 0 6px; }
+  .fxk-viewswitch svg { width: 14px; height: 14px; }
   .fxk-viewswitch-label {
     position: absolute; width: 1px; height: 1px;
     margin: -1px; padding: 0; overflow: hidden;

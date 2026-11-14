@@ -1056,13 +1056,13 @@ figure { margin: 0; }
   align-self: flex-start;
   display: flex;
   gap: 2px;
-  padding: 2px;
-  border-radius: 7px;
-  background: var(--surface-3);
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
   font-size: 9px;
 }
-.seg span { padding: 3px 8px; border-radius: 5px; color: var(--ink-3); }
-.seg .on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
+.seg span { padding: 3px 8px; border-radius: 5px; color: var(--ink-2); }
+.seg .on { background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); font-weight: 600; }
 .fake-table {
   border: 1px solid var(--line);
   border-radius: 9px;
