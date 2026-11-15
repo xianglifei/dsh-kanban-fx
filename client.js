@@ -322,6 +322,7 @@ window.__ModuleLoader__.load({
 /* 点完成时的确认：比编辑抽屉轻，居中一张小卡 */
 .fxk-overlay[data-align="center"] { align-items: center; justify-content: center; padding: 24px; }
 .fxk-confirm {
+  position: relative;
   width: min(440px, 100%);
   display: flex; flex-direction: column; gap: 10px;
   padding: 18px;
@@ -329,6 +330,16 @@ window.__ModuleLoader__.load({
   background: var(--fxk-card); box-shadow: var(--fxk-shadow);
   animation: fxk-pop 140ms ease-out;
 }
+/* 取消不是第三个决定，只是关掉：做成右上角那颗 ✕（点外面 / Esc 也一样） */
+.fxk-confirm-close {
+  position: absolute; top: 10px; right: 10px;
+  width: 22px; height: 22px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: transparent;
+  color: var(--fxk-text-3); font-size: 13px; line-height: 1; cursor: pointer;
+}
+.fxk-confirm-close:hover { background: var(--fxk-hover); color: var(--fxk-text); }
+.fxk-confirm-close:focus-visible { outline: 2px solid color-mix(in srgb, var(--fxk-link) 70%, transparent); outline-offset: 1px; }
 @keyframes fxk-pop { from { transform: translateY(6px); opacity: .7; } to { transform: none; opacity: 1; } }
 .fxk-confirm-title { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--fxk-text); }
 .fxk-confirm-text { font-size: 12.5px; line-height: 20px; color: var(--fxk-text-2); }
@@ -3725,6 +3736,17 @@ window.__ModuleLoader__.load({
                 'aria-modal': 'true',
                 'aria-label': doneConfirmTitle,
               },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'fxk-confirm-close',
+                  'aria-label': t('关掉这条提示（取消）', 'Close this reminder (cancel)'),
+                  title: t('取消：先不动这张卡片', 'Cancel — leave the card as it is'),
+                  onClick: () => setDoneConfirm(null),
+                },
+                '✕',
+              ),
               h('div', { className: 'fxk-confirm-title' }, doneConfirmTitle),
               h('div', { className: 'fxk-confirm-text' }, mergeSummaryOf(doneConfirm.card)),
               h(
@@ -3732,13 +3754,18 @@ window.__ModuleLoader__.load({
                 { className: 'fxk-confirm-text' },
                 canAskSession
                   ? t(
-                      '可以让这一轮的会话去合并并清理；也可以自己合并，或仍然标记完成。',
-                      'You can let this card’s conversation merge and clean up, merge it yourself, or mark it done anyway.',
+                      '可以让这一轮的会话去合并并清理；也可以继续完成——看板只记下这一轮没合回去。',
+                      'You can let this card’s conversation merge and clean up, or complete anyway — the board just records that nothing was merged back.',
                     )
-                  : t(
-                      '现在标记完成只是记录事实，改动不会自动合回去。',
-                      'Marking it done only records the fact — the changes will not be merged by themselves.',
-                    ),
+                  : doneConfirmMerge && doneConfirmMerge.state === 'unmerged'
+                    ? t(
+                        '这一轮的会话已经归档，看板没法让会话合并；可以复制命令在项目目录里手动合并，或者继续完成。',
+                        'This card’s conversation is archived, so it cannot merge for you; copy the command and run it in the project root, or complete anyway.',
+                      )
+                    : t(
+                        '这一轮的会话已经归档，看板没法让会话合并；检出里还有没提交的改动，先去检出里提交或复制出来，再合并。',
+                        'This card’s conversation is archived, so it cannot merge for you; the checkout has uncommitted changes — commit or copy them first, then merge.',
+                      ),
               ),
               h(
                 'div',
@@ -3755,28 +3782,7 @@ window.__ModuleLoader__.load({
                       void performDone(pending)
                     },
                   },
-                  t('仍然完成', 'Mark done anyway'),
-                ),
-                doneConfirmMerge && doneConfirmMerge.state === 'unmerged'
-                  ? h(
-                      'button',
-                      {
-                        type: 'button',
-                        className: 'fxk-btn',
-                        onClick: () => void copyMergeCommand('merge', doneConfirm.card),
-                      },
-                      t('复制命令', 'Copy command'),
-                    )
-                  : null,
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: canAskSession ? 'fxk-btn' : 'fxk-btn fxk-btn-primary',
-                    autoFocus: !canAskSession,
-                    onClick: () => setDoneConfirm(null),
-                  },
-                  t('先去合并', 'Merge first'),
+                  t('继续完成', 'Complete anyway'),
                 ),
                 canAskSession
                   ? h(
@@ -3790,7 +3796,21 @@ window.__ModuleLoader__.load({
                       },
                       t('让会话合并', 'Let the conversation merge'),
                     )
-                  : null,
+                  : doneConfirmMerge && doneConfirmMerge.state === 'unmerged'
+                    ? h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'fxk-btn fxk-btn-primary',
+                          autoFocus: true,
+                          onClick: () => {
+                            void copyMergeCommand('merge', doneConfirm.card)
+                            setDoneConfirm(null)
+                          },
+                        },
+                        t('复制命令', 'Copy command'),
+                      )
+                    : null,
               ),
             ),
           )

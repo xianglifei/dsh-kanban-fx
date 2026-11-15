@@ -128,6 +128,13 @@ and steps — the model does the Git writes under that session's sandbox, and th
 turn). The settings page now spells out the reminder under the worktree switch. Both halves change: reload the
 plugin or restart DSH, then refresh; storage stays at version 2.
 
+0.9.1 is client-only: the completion dialog now offers two decisions — “Complete anyway” and “Let the conversation
+merge” — with a ✕ to cancel; “Copy command” no longer sits beside them (it lives on the branch chip and only
+replaces “Let the conversation merge” when the conversation is archived). If the conversation is archived and only
+uncommitted files are left, the dialog keeps just “Complete anyway” and says to commit or copy them first. The
+“merge” action sends the message immediately (it does not prefill a draft). Refresh the page; nothing changes on the
+Host.
+
 ## Reference
 
 Interface details, autosave, title derivation, card numbering, storage schema, Host endpoints, and the run /
