@@ -120,6 +120,14 @@ show only the branch name). `GET /board` cards gain `worktree.merge` / `worktree
 DSH, then refresh; `board.json` only gains an optional field and storage stays at version 2. Squash and rebase
 merges cannot be detected, so the copy says “not detected” rather than “not merged”. 
 
+0.9.0 builds on that: the probe also runs a read-only `git status --porcelain` inside the checkout, so uncommitted
+files show up as “uncommitted” instead of “no commits” (`merge.dirty` / `merge.dirtyCount`); the branch chip gets a
+copy button for the merge or cleanup command; the completion dialog gained “copy command” and “let the conversation
+merge” (`POST /card {action:'merge'}` sends the card's conversation a message with the repo root, branch, checkout
+and steps — the model does the Git writes under that session's sandbox, and the card returns to Running for that
+turn). The settings page now spells out the reminder under the worktree switch. Both halves change: reload the
+plugin or restart DSH, then refresh; storage stays at version 2.
+
 ## Reference
 
 Interface details, autosave, title derivation, card numbering, storage schema, Host endpoints, and the run /

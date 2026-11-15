@@ -234,12 +234,17 @@ function normalizeCardMerge(input) {
   const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
   const state = MERGE_STATES.has(source.state) ? source.state : null
   if (!state) return null
-  const ahead = Number(source.ahead)
+  // 注意：Number(null) 是 0，会把「不知道」写成 0；先挡掉 null / undefined
+  const ahead = source.ahead === null || source.ahead === undefined ? null : Number(source.ahead)
+  const dirtyCount = source.dirtyCount === null || source.dirtyCount === undefined ? null : Number(source.dirtyCount)
   return {
     state,
     gone: source.gone === true,
     into: typeof source.into === 'string' && source.into ? textOf(source.into, 200) : null,
     ahead: Number.isFinite(ahead) && ahead >= 0 ? Math.floor(ahead) : null,
+    // 检出里还有没有未提交的改动：合并带不过去，删检出前也得知道
+    dirty: source.dirty === true ? true : source.dirty === false ? false : null,
+    dirtyCount: Number.isFinite(dirtyCount) && dirtyCount >= 0 ? Math.floor(dirtyCount) : null,
     observedAt: Number(source.observedAt) || null,
     goneAt: Number(source.goneAt) || null,
   }
@@ -312,8 +317,22 @@ function sameMerge(left, right) {
     left.state === right.state &&
     Boolean(left.gone) === Boolean(right.gone) &&
     (left.into || null) === (right.into || null) &&
-    (left.ahead ?? null) === (right.ahead ?? null)
+    (left.ahead ?? null) === (right.ahead ?? null) &&
+    (left.dirty ?? null) === (right.dirty ?? null) &&
+    (left.dirtyCount ?? null) === (right.dirtyCount ?? null)
   )
+}
+
+/** 检出里有没有未提交的文件（只读；检出不在或 Git 报错就返回不知道）。 */
+async function probeCheckoutDirty(checkoutPath) {
+  if (!checkoutPath || !existsSync(checkoutPath)) return { dirty: null, dirtyCount: null }
+  try {
+    const output = await readGit(checkoutPath, ['status', '--porcelain'])
+    const count = output.split('\n').filter((line) => line.trim().length > 0).length
+    return { dirty: count > 0, dirtyCount: count }
+  } catch {
+    return { dirty: null, dirtyCount: null }
+  }
 }
 
 /**
@@ -337,13 +356,16 @@ async function probeCardMerge(repositoryRoot, card, refs) {
       gone: true,
       into: previous ? previous.into : null,
       ahead: previous ? previous.ahead : null,
+      dirty: null,
+      dirtyCount: null,
       observedAt: previous ? previous.observedAt : null,
       goneAt: previous && previous.gone && previous.goneAt ? previous.goneAt : Date.now(),
     }
   }
+  const checkout = await probeCheckoutDirty(worktree.path)
   const baseCommit = safeObjectName(worktree.baseCommit)
   if (baseCommit && baseCommit === tip) {
-    return { state: 'empty', gone: false, into: null, ahead: 0, observedAt: Date.now(), goneAt: null }
+    return { state: 'empty', gone: false, into: null, ahead: 0, ...checkout, observedAt: Date.now(), goneAt: null }
   }
   let ahead = null
   if (baseCommit) {
@@ -369,9 +391,9 @@ async function probeCardMerge(repositoryRoot, card, refs) {
     return null
   }
   if (containing.length > 0) {
-    return { state: 'merged', gone: false, into: mergeTargetOf(containing), ahead, observedAt: Date.now(), goneAt: null }
+    return { state: 'merged', gone: false, into: mergeTargetOf(containing), ahead, ...checkout, observedAt: Date.now(), goneAt: null }
   }
-  return { state: 'unmerged', gone: false, into: null, ahead, observedAt: Date.now(), goneAt: null }
+  return { state: 'unmerged', gone: false, into: null, ahead, ...checkout, observedAt: Date.now(), goneAt: null }
 }
 
 /** 新建卡片时的空记录；`requested` 只由创建 / 编辑接口写。 */
@@ -388,6 +410,30 @@ function branchSlugOf(title) {
     .slice(0, 24)
     .replace(/-+$/g, '')
   return slug
+}
+
+/** 「让会话合并」发给模型的那段话：只给事实与步骤，写操作由会话自己用 Git 完成。 */
+function mergePromptOf(card) {
+  const worktree = card.worktree
+  const title = deriveTitle(card.title, card.body, card.attachments)
+  const seq = Number.isInteger(card.seq) && card.seq > 0 ? `fx-${card.seq}` : ''
+  const lines = [
+    `请把这张卡片${seq ? `（${seq}）` : ''}的改动合并回主分支并收尾（Merge this branch back and clean up）。`,
+    title ? `标题：${title}` : null,
+    `- 仓库根：${worktree.repositoryRoot || '（未知，先在当前目录 git rev-parse --show-toplevel 确认）'}`,
+    `- 分支：${worktree.branch}`,
+    worktree.path ? `- 检出：${worktree.path}` : null,
+    '',
+    '1. 在仓库根确认当前在要合入的分支上（通常是 main）、工作区干净；',
+    '2. 如果检出里还有未提交的改动，先提交，或者告诉我为什么不提交；',
+    `3. git merge --no-ff ${worktree.branch}；有冲突就停下来，把冲突文件告诉我，别强推、别 rebase 已经公开的历史；`,
+    '4. 合并成功后跑一下相关的测试或自检；',
+    worktree.path
+      ? `5. 移除检出（git worktree remove ${worktree.path}，要求检出干净），然后 git branch -d ${worktree.branch}；`
+      : `5. 合并成功后 git branch -d ${worktree.branch}；`,
+    '6. 用一两句话报告：合入哪个分支、合并提交、有没有删分支。',
+  ]
+  return lines.filter((line) => line !== null).join('\n')
 }
 
 /** 看板自己的命名规则：fx-<编号>[-标题片段]，重试时加 4 位随机后缀。 */
@@ -1315,6 +1361,68 @@ export function apply(ctx, config) {
     return card
   }
 
+  /** 让这张卡片的会话自己去合并：插件只发一条消息，Git 写操作交给模型与沙箱。 */
+  async function askSessionToMerge(card) {
+    const worktree = card.worktree
+    if (!worktree || !worktree.branch) throw httpError(400, '这张卡片没有工作树分支，没什么可合并的')
+    const status = statusOf(card)
+    if (status !== STATUS.REVIEW && status !== STATUS.DONE) throw httpError(409, '这一轮还在跑，等它结束再合并')
+    const sessionId = card.sessionId
+    const sessionArchived = Boolean(card.sessionArchived || (sessionId && archivedSessionIds().includes(sessionId)))
+    if (!sessionId || sessionArchived) {
+      if (sessionArchived) card.sessionArchived = true
+      throw httpError(409, '这张卡片的会话已经不在了，没法让会话去合并；可以在项目目录里手动合并')
+    }
+    const controller = ctx.get('sessionController')
+    if (!controller || typeof controller.resolveAgent !== 'function') {
+      throw httpError(503, '当前 DSH 版本没有会话服务，无法让会话去合并')
+    }
+    const resolved = await resolveAgent(controller, sessionId)
+    if (!resolved || !resolved.agent) {
+      if (resolved?.error?.code === 'session/not-found') card.sessionArchived = true
+      throw httpError(409, `会话不可用：${resolved?.error?.message || '未知原因'}`)
+    }
+    const previous = {
+      runningSince: card.runningSince,
+      lastRunStartedAt: card.lastRunStartedAt,
+      doneAt: card.doneAt,
+    }
+    const message = {
+      id: randomUUID(),
+      role: 'user',
+      content: [{ type: 'text', text: mergePromptOf(card) }],
+      source: { kind: 'user' },
+    }
+    // 发出去就等于重新开一轮：卡片回到进行中，跑完由 turn/end 落回待审核
+    card.runningSince = Date.now()
+    card.lastRunStartedAt = card.runningSince
+    card.lastRunEndedAt = null
+    card.doneAt = null
+    card.error = null
+    card.awaitingSince = null
+    card.awaitingKind = null
+    card.awaitingId = null
+    card.awaitingMs = 0
+    touch(card, 'merge-ask')
+    try {
+      resolved.agent.followup(message)
+    } catch (error) {
+      // 投递失败：把这几个状态原样还回去，别让一张待审核的卡片掉回待办
+      card.runningSince = previous.runningSince
+      card.lastRunStartedAt = previous.lastRunStartedAt
+      card.doneAt = previous.doneAt
+      card.error = String(error?.message ?? error)
+      touch(card, 'merge-ask-failed')
+      throw httpError(500, `没能让会话开始合并：${card.error}`)
+    }
+    try {
+      await ctx.sessions?.flush?.(resolved.agent.session)
+    } catch (error) {
+      console.error('[kanban-fx] 会话落盘确认失败（不影响运行）：', error?.message ?? error)
+    }
+    return card
+  }
+
   function removeCard(input) {
     const card = cardOf(input)
     if (card.runningSince || card.preparingSince) throw httpError(409, '正在运行的卡片不能删除')
@@ -1720,9 +1828,12 @@ export function apply(ctx, config) {
       else if (action === 'done') {
         const result = await markDone(body)
         card = result.card
+        // 刚点完成：不等 60 秒节流，下一次探测立刻重新问
+        if (card) forceMergeProbe(card)
         completionResult = result.completionResult
         completionWarning = result.completionWarning
-      } else if (action === 'undone') card = markUndone(body)
+      } else if (action === 'merge') card = await askSessionToMerge(cardOf(body))
+      else if (action === 'undone') card = markUndone(body)
       else throw httpError(400, `未知操作：${action || '(空)'}`)
       if (card) saveNow()
       const payload = { ...boardPayload(), card: card ? mergeViewOf(viewOf(card)) : null }
