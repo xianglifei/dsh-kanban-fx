@@ -18,6 +18,9 @@ window.__ModuleLoader__.load({
     const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
     // 自动保存：停手 1.2 秒先存一次，连续打字时再每 8 秒兜底存一次
     const AUTOSAVE_IDLE_MS = 1200
+    // 会话标题栏的卡片状态没有推送通道：这一轮在跑时每 4 秒问一次 Host，
+    // 问句一出现就换「等你回答」，回答之后也能及时回到「进行中」。
+    const HEADER_CARD_POLL_MS = 4000
     const AUTOSAVE_INTERVAL_MS = 8000
     // 设置页：收尾提示词上限跟 Host 保持一致；停手 600ms 自动保存
     const PROMPT_MAX_CHARS = 4000
@@ -130,8 +133,8 @@ window.__ModuleLoader__.load({
         id: 'running',
         zh: '进行中',
         en: 'Running',
-        hintZh: '在执行中的卡片会出现在这里，右上角显示本轮已经跑了多久。',
-        hintEn: 'Cards that are running show up here with a live timer.',
+        hintZh: '在执行中的卡片会出现在这里，右上角显示本轮已经跑了多久。助手暂停等你回话时，卡片会亮起「等你回答」并排到最前。',
+        hintEn: 'Cards that are running show up here with a live timer. When the agent waits for your answer, the card shows “waiting” and moves to the top.',
       },
       {
         id: 'review',
@@ -373,6 +376,8 @@ window.__ModuleLoader__.load({
   display: flex; align-items: center; gap: 8px;
   padding: 12px 14px 10px;
   border-bottom: 1px solid var(--fxk-border-soft);
+  /* 列被挤窄时只留「数字变琥珀」，文案收起（卡片自己会写明「等你回答」） */
+  container-type: inline-size;
 }
 .fxk-col-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--fxk-idle); flex: none; }
 .fxk-col[data-state="todo"] .fxk-col-dot { background: var(--fxk-idle); }
@@ -385,6 +390,22 @@ window.__ModuleLoader__.load({
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 999px; background: var(--fxk-hover); color: var(--fxk-text-2);
   font-size: 11px; line-height: 1; font-variant-numeric: tabular-nums;
+}
+/* 有卡片在等你回答：计数本身变成琥珀色的提示 */
+.fxk-col-count.is-await {
+  background: color-mix(in srgb, var(--fxk-warn) 16%, transparent);
+  color: color-mix(in srgb, var(--fxk-warn) 42%, var(--fxk-text));
+  font-weight: 600;
+}
+.fxk-col-await {
+  height: 20px; padding: 0 7px; border-radius: 999px;
+  display: inline-flex; align-items: center;
+  background: color-mix(in srgb, var(--fxk-warn) 14%, transparent);
+  color: color-mix(in srgb, var(--fxk-warn) 42%, var(--fxk-text));
+  font-size: 11px; line-height: 1; font-weight: 560; white-space: nowrap;
+}
+@container (max-width: 210px) {
+  .fxk-col-await { display: none; }
 }
 .fxk-col-body {
   flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
@@ -542,6 +563,16 @@ window.__ModuleLoader__.load({
   70% { box-shadow: 0 0 0 7px transparent; }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
+/* 「等你回答」的计时：不闪 —— 它不是进度，是球在用户这边。
+   琥珀点的常态标记和「运行中」的 ink 脉冲，扫一眼就能分开。 */
+.fxk-await-dot {
+  width: 6px; height: 6px; border-radius: 999px; flex: none;
+  background: var(--fxk-warn);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--fxk-warn) 22%, transparent);
+}
+.fxk-timer-awaiting { color: color-mix(in srgb, var(--fxk-warn) 45%, var(--fxk-text)); }
+.fxk-timer-awaiting b { color: var(--fxk-text); }
+.fxk-awaiting-label { font-weight: 560; }
 
 /* ----------------------------------------------------------------- list */
 /* 平铺表格：一张随内容伸缩的面板，表头 sticky；状态是行内字段，不是分组。 */
@@ -658,6 +689,8 @@ window.__ModuleLoader__.load({
 .fxk-state-dot { width: 6px; height: 6px; border-radius: 999px; flex: none; background: var(--fxk-idle); }
 .fxk-state[data-state="running"] { background: color-mix(in srgb, var(--fxk-brand) 8%, transparent); color: var(--fxk-text); }
 .fxk-state[data-state="running"] .fxk-state-dot { background: var(--fxk-brand); }
+.fxk-state[data-state="awaiting"] { background: color-mix(in srgb, var(--fxk-warn) 12%, transparent); color: color-mix(in srgb, var(--fxk-warn) 45%, var(--fxk-text)); }
+.fxk-state[data-state="awaiting"] .fxk-state-dot { background: var(--fxk-warn); }
 .fxk-state[data-state="review"] { background: color-mix(in srgb, var(--fxk-warn) 13%, transparent); color: color-mix(in srgb, var(--fxk-warn) 45%, var(--fxk-text)); }
 .fxk-state[data-state="review"] .fxk-state-dot { background: var(--fxk-warn); }
 .fxk-state[data-state="done"] { background: color-mix(in srgb, var(--fxk-ok) 11%, transparent); color: color-mix(in srgb, var(--fxk-ok) 50%, var(--fxk-text)); }
@@ -989,6 +1022,7 @@ window.__ModuleLoader__.load({
   .fxk-table tbody td.c-acts { padding-right: 12px; }
   .fxk-mob-dot { display: inline-block; width: 7px; height: 7px; border-radius: 999px; flex: none; background: var(--fxk-idle); }
   .fxk-mob-dot[data-state="running"] { background: var(--fxk-brand); }
+  .fxk-mob-dot[data-state="awaiting"] { background: var(--fxk-warn); }
   .fxk-mob-dot[data-state="review"] { background: var(--fxk-warn); }
   .fxk-mob-dot[data-state="done"] { background: var(--fxk-ok); }
   .fxk-mob-timer { display: inline-flex; }
@@ -1068,6 +1102,7 @@ window.__ModuleLoader__.load({
 .fxk-hd-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--fxk-hd-text-3); flex: none; }
 .fxk-hd-state[data-state="running"] .fxk-hd-dot { background: var(--fxk-hd-run); }
 .fxk-hd-state[data-state="finishing"] .fxk-hd-dot { background: var(--fxk-hd-run); }
+.fxk-hd-state[data-state="awaiting"] .fxk-hd-dot { background: var(--fxk-hd-review); }
 .fxk-hd-state[data-state="review"] .fxk-hd-dot { background: var(--fxk-hd-review); }
 .fxk-hd-state[data-state="done"] .fxk-hd-dot { background: var(--fxk-hd-done); }
 .fxk-hd-btn {
@@ -1277,10 +1312,11 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 列表的用时：进行中算当前这一轮，其余用上一次跑完的用时。
-     * 排序和展示共用，避免「按用时排序」和看到的数字对不上。
+     * 列表的用时：进行中算当前这一轮；等你回答时给已等时长（和单元格里显示的一致）；
+     * 其余用上一次跑完的用时。排序和展示共用，避免「按用时排序」和看到的数字对不上。
      */
     function durationOf(card, now, skew) {
+      if (card.status === 'running' && card.awaitingSince) return Math.max(0, now - skew - card.awaitingSince)
       if (card.status === 'running' && card.runningSince) return Math.max(0, now - skew - card.runningSince)
       return Number(card.lastRunMs) || 0
     }
@@ -2459,7 +2495,11 @@ window.__ModuleLoader__.load({
           const key = groups[card.status] ? card.status : 'todo'
           groups[key].push(card)
         }
-        groups.running.sort((a, b) => (a.runningSince || 0) - (b.runningSince || 0))
+        groups.running.sort(
+          (a, b) =>
+            // 球在用户这边的卡片排最前：它们才是堵住进度的
+            Number(Boolean(b.awaiting)) - Number(Boolean(a.awaiting)) || (a.runningSince || 0) - (b.runningSince || 0),
+        )
         groups.review.sort((a, b) => (b.lastRunEndedAt || 0) - (a.lastRunEndedAt || 0))
         groups.done.sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0))
         groups.todo.sort((a, b) => a.createdAt - b.createdAt)
@@ -2486,6 +2526,12 @@ window.__ModuleLoader__.load({
       const elapsedOf = (card) => {
         if (!card.runningSince) return 0
         return Math.max(0, now - skewRef.current - card.runningSince)
+      }
+
+      // 「等你回答」的计时：助手挂起在问句 / 权限确认上，这一轮还开着，但用户关心的是已经等了多久。
+      const awaitElapsedOf = (card) => {
+        if (!card.awaitingSince) return 0
+        return Math.max(0, now - skewRef.current - card.awaitingSince)
       }
 
       const renderCard = (card) => {
@@ -2554,7 +2600,11 @@ window.__ModuleLoader__.load({
             'data-state': state,
             role: 'button',
             tabIndex: 0,
-            'aria-label': card.finishing ? t(`${card.title}（收尾中）`, `${card.title} (wrapping up)`) : card.title,
+            'aria-label': card.finishing
+              ? t(`${card.title}（收尾中）`, `${card.title} (wrapping up)`)
+              : card.awaiting
+                ? t(`${card.title}（等你回答）`, `${card.title} (waiting for you)`)
+                : card.title,
             onClick: () => openCard(card),
             onKeyDown: (event) => {
               // 内部按钮（折叠箭头 / 撤销 / 执行）自己处理键盘，不再冒泡触发「打开会话」。
@@ -2594,18 +2644,32 @@ window.__ModuleLoader__.load({
                       h('span', { className: 'fxk-pulse' }),
                       h('span', { className: 'fxk-finishing-label' }, t('准备工作树…', 'preparing worktree')),
                     )
-                  : h(
-                      'span',
-                      {
-                        className: 'fxk-timer',
-                        title: card.finishing
-                          ? t('收尾提示词正在跑，跑完自动完成', 'The wrap-up prompt is running; the card completes automatically')
-                          : undefined,
-                      },
-                      h('span', { className: 'fxk-pulse' }),
-                      h('b', null, formatElapsed(elapsedOf(card))),
-                      h('span', { className: card.finishing ? 'fxk-finishing-label' : undefined }, card.finishing ? t('收尾中', 'wrapping up') : t('运行中', 'running')),
-                    ),
+                  : card.awaiting
+                    ? h(
+                        'span',
+                        {
+                          className: 'fxk-timer fxk-timer-awaiting',
+                          title: t(
+                            '助手在会话里等你回话，回答后这一轮原地继续；这段时间不算任务用时',
+                            'The agent is waiting for your reply and continues where it left off; this wait is not counted as run time',
+                          ),
+                        },
+                        h('span', { className: 'fxk-await-dot' }),
+                        h('b', null, formatElapsed(awaitElapsedOf(card))),
+                        h('span', { className: 'fxk-awaiting-label' }, t('等你回答', 'waiting')),
+                      )
+                    : h(
+                        'span',
+                        {
+                          className: 'fxk-timer',
+                          title: card.finishing
+                            ? t('收尾提示词正在跑，跑完自动完成', 'The wrap-up prompt is running; the card completes automatically')
+                            : undefined,
+                        },
+                        h('span', { className: 'fxk-pulse' }),
+                        h('b', null, formatElapsed(elapsedOf(card))),
+                        h('span', { className: card.finishing ? 'fxk-finishing-label' : undefined }, card.finishing ? t('收尾中', 'wrapping up') : t('运行中', 'running')),
+                      ),
                 card.lastRunStartedAt
                   ? h(
                       'span',
@@ -2733,6 +2797,8 @@ window.__ModuleLoader__.load({
       const renderColumn = (column) => {
         const items = byColumn[column.id] || []
         const isTodo = column.id === 'todo'
+        // 进行中列头补一句「N 张等你回答」：卡片已经排到最前，这里再给一个一眼能看到的数
+        const awaitingCount = column.id === 'running' ? items.filter((card) => card.awaiting).length : 0
         return h(
           'section',
           { key: column.id, className: 'fxk-col', 'data-state': column.id, 'aria-label': isZh() ? column.zh : column.en },
@@ -2741,7 +2807,21 @@ window.__ModuleLoader__.load({
             { className: 'fxk-col-head' },
             h('span', { className: 'fxk-col-dot' }),
             h('span', { className: 'fxk-col-name' }, isZh() ? column.zh : column.en),
-            h('span', { className: 'fxk-col-count' }, String(items.length)),
+            h(
+              'span',
+              {
+                className: awaitingCount > 0 ? 'fxk-col-count is-await' : 'fxk-col-count',
+                title: awaitingCount > 0 ? t(`${awaitingCount} 张等你回答`, `${awaitingCount} waiting for you`) : undefined,
+              },
+              String(items.length),
+            ),
+            awaitingCount > 0
+              ? h(
+                  'span',
+                  { className: 'fxk-col-await', title: t('这些卡片在等你回话，回答后原地继续跑', 'These cards are waiting for your reply; they continue once you answer') },
+                  t(`${awaitingCount} 张等你回答`, `${awaitingCount} waiting`),
+                )
+              : null,
           ),
           h(
             'div',
@@ -2795,12 +2875,16 @@ window.__ModuleLoader__.load({
 
       const renderListRow = (card) => {
         const state = card.status
+        // 进行中里「等你回答」的那一档：状态仍是进行中，只是这一轮卡在用户这边
+        const awaiting = state === 'running' && Boolean(card.awaiting)
         const attachmentCount = (card.attachments || []).length
         const updatedAt = Number(card.updatedAt) || Number(card.createdAt) || 0
         const elapsed = elapsedOf(card)
         const duration =
           state === 'running'
-            ? h('span', { className: 'fxk-timer' }, h('span', { className: 'fxk-pulse' }), h('b', null, formatElapsed(elapsed)))
+            ? awaiting
+              ? h('span', { className: 'fxk-timer fxk-timer-awaiting' }, h('span', { className: 'fxk-await-dot' }), h('b', null, formatElapsed(awaitElapsedOf(card))))
+              : h('span', { className: 'fxk-timer' }, h('span', { className: 'fxk-pulse' }), h('b', null, formatElapsed(elapsed)))
             : Number(card.lastRunMs) > 0
               ? h('span', { className: 'fxk-dur-text' }, formatDuration(card.lastRunMs))
               : h('span', { className: 'fxk-dur-empty' }, '—')
@@ -2889,15 +2973,27 @@ window.__ModuleLoader__.load({
               'span',
               {
                 className: 'fxk-state',
-                'data-state': state,
-                title: card.preparing
-                  ? t('进行中 · 准备工作树', 'Running · preparing worktree')
-                  : card.finishing
-                    ? t('进行中 · 收尾', 'Running · wrap-up')
-                    : undefined,
+                'data-state': awaiting ? 'awaiting' : state,
+                title: awaiting
+                  ? t('进行中 · 等你回答', 'Running · waiting for you')
+                  : card.preparing
+                    ? t('进行中 · 准备工作树', 'Running · preparing worktree')
+                    : card.finishing
+                      ? t('进行中 · 收尾', 'Running · wrap-up')
+                      : undefined,
               },
               h('span', { className: 'fxk-state-dot', 'aria-hidden': 'true' }),
-              h('span', null, card.preparing ? t('准备中', 'Preparing') : card.finishing ? t('收尾中', 'Wrapping up') : statusLabelOf(state)),
+              h(
+                'span',
+                null,
+                awaiting
+                  ? t('等你回答', 'Waiting')
+                  : card.preparing
+                    ? t('准备中', 'Preparing')
+                    : card.finishing
+                      ? t('收尾中', 'Wrapping up')
+                      : statusLabelOf(state),
+              ),
             ),
           ),
           h('td', { className: 'fxk-td fxk-td-seq c-seq' }, cardSeqLabel(card) || '—'),
@@ -2912,13 +3008,15 @@ window.__ModuleLoader__.load({
                 'span',
                 {
                   className: 'fxk-mob-dot',
-                  'data-state': state,
+                  'data-state': awaiting ? 'awaiting' : state,
                   role: 'img',
-                  'aria-label': card.preparing
-                    ? t('准备中', 'Preparing')
-                    : card.finishing
-                      ? t('收尾中', 'Wrapping up')
-                      : statusLabelOf(state),
+                  'aria-label': awaiting
+                    ? t('等你回答', 'Waiting for you')
+                    : card.preparing
+                      ? t('准备中', 'Preparing')
+                      : card.finishing
+                        ? t('收尾中', 'Wrapping up')
+                        : statusLabelOf(state),
                 },
               ),
               h('button', { type: 'button', className: 'fxk-title', title: card.title }, card.title),
@@ -2943,9 +3041,9 @@ window.__ModuleLoader__.load({
             state === 'running'
               ? h(
                   'span',
-                  { className: 'fxk-timer fxk-mob-timer' },
-                  h('span', { className: 'fxk-pulse' }),
-                  h('b', null, formatElapsed(elapsed)),
+                  { className: awaiting ? 'fxk-timer fxk-timer-awaiting fxk-mob-timer' : 'fxk-timer fxk-mob-timer' },
+                  h('span', { className: awaiting ? 'fxk-await-dot' : 'fxk-pulse' }),
+                  h('b', null, formatElapsed(awaiting ? awaitElapsedOf(card) : elapsed)),
                 )
               : null,
             h('div', { className: 'fxk-acts' }, actions),
@@ -2956,15 +3054,16 @@ window.__ModuleLoader__.load({
       const renderListTable = () => {
         const total = visibleCards.length
         const open = total - totals.done
+        const awaitingTotal = visibleCards.filter((card) => card.status === 'running' && card.awaiting).length
         const sortColumn = LIST_COLUMNS.find((item) => item.key === sort.key) || LIST_COLUMNS[0]
         const sortName = t(sortColumn.zh, sortColumn.en)
         const arrow = sort.dir === 'asc' ? '↑' : '↓'
         const footFull = isZh()
-          ? `共 ${total} 张 · 待办 ${totals.todo} · 进行中 ${totals.running} · 待审核 ${totals.review} · 已完成 ${totals.done}`
-          : `${total} cards · ${totals.todo} to do · ${totals.running} running · ${totals.review} review · ${totals.done} done`
+          ? `共 ${total} 张 · 待办 ${totals.todo} · 进行中 ${totals.running}${awaitingTotal > 0 ? `（${awaitingTotal} 张等你回答）` : ''} · 待审核 ${totals.review} · 已完成 ${totals.done}`
+          : `${total} cards · ${totals.todo} to do · ${totals.running} running${awaitingTotal > 0 ? ` (${awaitingTotal} waiting for you)` : ''} · ${totals.review} review · ${totals.done} done`
         const footShort = isZh()
-          ? `按${sortName} ${arrow} · 共 ${total} 张 · 未完成 ${open}`
-          : `By ${sortName} ${arrow} · ${total} cards · ${open} open`
+          ? `按${sortName} ${arrow} · 共 ${total} 张 · 未完成 ${open}${awaitingTotal > 0 ? ` · 等你 ${awaitingTotal}` : ''}`
+          : `By ${sortName} ${arrow} · ${total} cards · ${open} open${awaitingTotal > 0 ? ` · ${awaitingTotal} waiting` : ''}`
 
         return h(
           'div',
@@ -3859,6 +3958,12 @@ window.__ModuleLoader__.load({
         hintZh: '收尾提示词正在跑，跑完自动完成',
         hintEn: 'The wrap-up prompt is running; the card completes automatically',
       },
+      awaiting: {
+        zh: '等你回答',
+        en: 'Waiting for you',
+        hintZh: '助手在会话里等你回话，回答后这一轮原地继续',
+        hintEn: 'The agent is waiting for your reply; the run continues where it left off',
+      },
       review: {
         zh: '待审核',
         en: 'In review',
@@ -3923,11 +4028,25 @@ window.__ModuleLoader__.load({
         wasRunning.current = running
       }, [running, card, sessionId, load])
 
+      // 「等你回答」只是卡片上的一枚派生标记，没有独立事件推到标题栏：这一轮在跑的时候
+      // 隔几秒问一次 Host（一张卡一个轻请求），问句出现 / 回答完都能在 4 秒内反映出来。
+      useEffect(() => {
+        if (!running) return undefined
+        const timer = window.setInterval(() => {
+          void load()
+        }, HEADER_CARD_POLL_MS)
+        return () => window.clearInterval(timer)
+      }, [running, load])
+
       if (card === undefined || card === null || card.sessionArchived) return null
 
       const cardRunning = Boolean(card && card.status === 'running')
       const state = running || cardRunning
-        ? (card.finishing ? 'finishing' : 'running')
+        ? card.finishing
+          ? 'finishing'
+          : card.awaiting
+            ? 'awaiting'
+            : 'running'
         : card.status === 'done'
           ? 'done'
           : 'review'

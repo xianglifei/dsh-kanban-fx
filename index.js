@@ -7,6 +7,8 @@
  * - 「执行」：建（或复用）会话 → 把卡片内容作为一条 user 消息投进去 → 立刻开跑
  *   （首条消息 = 手写标题作第一行 + 正文原样；没写标题时只发正文）
  * - 状态机：由会话本身的事件推导（turn/start → 进行中，turn/end → 待审核）；
+ *   ask_user_question / 权限确认挂起时这一轮并没有结束，卡片仍是进行中，只额外给一个
+ *   「等你回答」的派生标记（不是第五种状态）；
  *   设置「完成之后」= prompt 时，点完成先发一条收尾提示词，turn/end 正常结束自动已完成，
  *   报错 / 中止回待审核；否则「已完成」仍是用户手点的标记。用户在会话里再发消息会自动回到进行中
  * - 用户设置（完成之后 / 收尾提示词）和卡片一起存在 board.json 的 settings 里，不走 cordis 配置
@@ -306,6 +308,9 @@ function viewOf(card) {
     finishing: Boolean(card.finishingSince),
     // 「准备工作树」同理：仍是进行中，只是这一步还没开始跑
     preparing: Boolean(card.preparingSince),
+    // 「等你回答」同理：助手在会话里问了问题 / 等权限确认，这一轮还开着，球在你这边
+    awaiting: Boolean(card.awaitingSince),
+    awaitingSince: card.awaitingSince || null,
     worktree: {
       requested: Boolean(card.worktree && card.worktree.requested),
       branch: (card.worktree && card.worktree.branch) || null,
@@ -365,6 +370,11 @@ function loadStore(file) {
         finishingSince: Number(card.finishingSince) || null,
         // 进行中的工作树创建不跨重启：那次执行已经没了，标记留着只会让卡片永远「准备中」
         preparingSince: null,
+        // 同理：重启后那个提问 / 审批已经不在，等待标记和累计等待时长都清掉
+        awaitingSince: null,
+        awaitingKind: null,
+        awaitingId: null,
+        awaitingMs: 0,
         worktree: normalizeCardWorktree(card.worktree),
         error: typeof card.error === 'string' && card.error ? card.error : null,
       }
@@ -822,6 +832,11 @@ export function apply(ctx, config) {
     card.lastRunEndedAt = null
     card.doneAt = null
     card.error = null
+    // 手动重跑等于新的一轮：等待回答 / 审批的累计时长从这里重新算
+    card.awaitingSince = null
+    card.awaitingKind = null
+    card.awaitingId = null
+    card.awaitingMs = 0
     touch(card, 'run')
 
     const message = {
@@ -873,6 +888,11 @@ export function apply(ctx, config) {
       doneAt: null,
       finishingSince: null,
       preparingSince: null,
+      // 等你回答 / 等审批只活在内存里：重启后那次提问已经不在了，残留标记只会让卡片永远「等你」
+      awaitingSince: null,
+      awaitingKind: null,
+      awaitingId: null,
+      awaitingMs: 0,
       worktree: blankCardWorktree(userSettings.worktree.offer && input?.worktree?.requested === true),
       error: null,
     }
@@ -1029,6 +1049,37 @@ export function apply(ctx, config) {
     return card
   }
 
+  /**
+   * 「等你回答」的派生状态：助手在会话里问了一句（`ask_user_question`）或在等一次权限确认时，
+   * 这一轮并没有结束 —— `agent.status` 仍是 running，`turn/end` 也不会来。看板因此照旧把卡片算作
+   * 进行中，只是球在用户这边；记下起点，Client 据此换文案、把它排到本列最前。
+   *
+   * 它不是第五种状态（`statusOf` 不看它），也只活在内存里：重启后那次提问已经不在，加载时整组清掉。
+   */
+  function beginAwaiting(card, kind, id, time) {
+    if (!card.runningSince || card.awaitingSince) return false
+    card.awaitingSince = time
+    card.awaitingKind = kind
+    card.awaitingId = id || null
+    return true
+  }
+
+  /** 等待结束（回答 / 审批结果到达，或这一轮收尾）：把这段等待累加进 awaitingMs 并清标记。 */
+  function endAwaiting(card, time) {
+    if (!card.awaitingSince) return false
+    card.awaitingMs = (Number(card.awaitingMs) || 0) + Math.max(0, time - card.awaitingSince)
+    card.awaitingSince = null
+    card.awaitingKind = null
+    card.awaitingId = null
+    return true
+  }
+
+  /** 这一轮真正跑了多久：等用户回答 / 审批的时间不算 agent 的工时。 */
+  function runMsOf(card, endedAt) {
+    if (!card.lastRunStartedAt) return null
+    return Math.max(0, endedAt - card.lastRunStartedAt - (Number(card.awaitingMs) || 0))
+  }
+
   /** 卡片状态与会话实况对齐：只修正在运行的卡片，避免误伤已完成。 */
   function reconcile() {
     const agents = ctx.get('agents')
@@ -1058,6 +1109,7 @@ export function apply(ctx, config) {
         const finishingAgent = card.sessionId ? agents?.get?.(card.sessionId) : undefined
         if (finishingAgent && finishingAgent.status === 'running') continue
         card.finishingSince = null
+        endAwaiting(card, now)
         card.runningSince = null
         card.lastRunEndedAt = now
         // 不收尾轮的时长覆盖原任务用时：完成/待审核卡片仍显示最后一次任务运行的时间
@@ -1065,15 +1117,20 @@ export function apply(ctx, config) {
         dirty = true
         continue
       }
-      if (!card.runningSince) continue
+      if (!card.runningSince) {
+        // 这一轮早就结束了（比如重启过），残留的等待标记不该让卡片一直亮着「等你回答」
+        if (endAwaiting(card, now)) dirty = true
+        continue
+      }
       // 刚投递的几毫秒里 agent 可能还没被唤醒，留一点余量再判「其实已经停了」
       if (now - card.runningSince < 3000) continue
       const agent = card.sessionId ? agents?.get?.(card.sessionId) : undefined
       if (agent && agent.status === 'running') continue
       // 事件漏了也能自愈：agent 不在、或已经 idle，就当作这一轮结束，落到待审核
+      endAwaiting(card, now)
       card.runningSince = null
       card.lastRunEndedAt = now
-      card.lastRunMs = card.lastRunStartedAt ? Math.max(0, now - card.lastRunStartedAt) : null
+      card.lastRunMs = runMsOf(card, now)
       dirty = true
     }
     if (dirty) {
@@ -1092,6 +1149,11 @@ export function apply(ctx, config) {
       card.lastRunEndedAt = null
       card.doneAt = null
       card.error = null
+      // 新的一轮：上一轮留下的等待（含累计时长）不再算数
+      card.awaitingSince = null
+      card.awaitingKind = null
+      card.awaitingId = null
+      card.awaitingMs = 0
       touch(card, 'turn-start')
       return
     }
@@ -1099,11 +1161,13 @@ export function apply(ctx, config) {
       const finishing = Boolean(card.finishingSince)
       if (!card.runningSince && card.lastRunEndedAt && !finishing) return
       const reason = event.data && event.data.reason
+      // 这一轮结束了：等待中的问题不会再有回答，等待标记就地收掉
+      endAwaiting(card, event.time)
       card.runningSince = null
       card.lastRunEndedAt = event.time
       // 收尾轮不覆盖原任务的用时：完成卡片仍显示最后一次任务运行了多久
       if (!finishing) {
-        card.lastRunMs = card.lastRunStartedAt ? Math.max(0, event.time - card.lastRunStartedAt) : null
+        card.lastRunMs = runMsOf(card, event.time)
       }
       if (reason && reason.kind === 'error') {
         card.error = reason.error?.message || '运行失败'
@@ -1117,6 +1181,32 @@ export function apply(ctx, config) {
         card.doneAt = failed ? null : event.time
       }
       touch(card, finishing ? 'turn-end-finishing' : 'turn-end')
+      return
+    }
+    // 助手问了一句：这次 tool call 会挂起等回答，答案作为它的结果回来。
+    // 只认卡片自己的这一轮（正常调用；PTC 子调用不在本看板的覆盖范围里）。
+    if (event.type === 'tool/call' && event.data && event.data.name === 'ask_user_question') {
+      if (beginAwaiting(card, 'question', event.data.callId, event.time)) touch(card, 'awaiting')
+      return
+    }
+    if (
+      event.type === 'tool/result' &&
+      card.awaitingKind === 'question' &&
+      event.data &&
+      event.data.message &&
+      event.data.message.toolCallId === card.awaitingId
+    ) {
+      if (endAwaiting(card, event.time)) touch(card, 'awaiting-answered')
+      return
+    }
+    // 等权限确认：asked / decided 是成对的会话事件，只有 policy = ask 时才会真的等用户。
+    if (event.type === 'approval/asked') {
+      if (beginAwaiting(card, 'approval', event.data && event.data.id, event.time)) touch(card, 'awaiting')
+      return
+    }
+    if (event.type === 'approval/decided' && card.awaitingKind === 'approval' && event.data && event.data.id === card.awaitingId) {
+      if (endAwaiting(card, event.time)) touch(card, 'awaiting-answered')
+      return
     }
   })
 

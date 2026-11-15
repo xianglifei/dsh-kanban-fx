@@ -26,19 +26,28 @@ for a specific workspace from that workspace's `…` menu.
 | Review | The turn ended and waits for your sign-off |
 | Done | You marked it done, or a finishing prompt ran successfully |
 | Running (finishing) | A finishing prompt was delivered and its turn has not ended; still counted as running |
+| Running (waiting for you) | The agent asked a question or awaits an approval; the turn is open, the ball is in your court. Still counted as running |
 
 Status follows the session: talking in the session moves the card back to Running; the turn ending moves it to
 Review again. Done is not final. Drag-and-drop and manual status changes are not supported in v1.
+
+`ask_user_question` (and an approval prompt) suspends the turn without ending it, so the card stays in Running.
+Instead of moving it to Review, the card is marked **waiting for you**: an amber dot, `0:40 waiting` (how long
+it has waited, not the run time), moved to the top of the Running column, and the column count turns amber.
+Answer in the session and the card continues in place; the wait is subtracted from the card's "took …" time.
+It is a label on Running, not a fifth status, and it never enters Review until the turn actually ends.
 
 ## Views
 
 - **Board**: four columns. The Done column is collapsed to one title row per card by default; click to expand.
 - **Card footer** never breaks words. A running card keeps "running" / "wrapping up" on one line and drops the
   right-aligned "since 11/15 14:30" once its column is narrow (under 260px in English, 230px in Chinese).
+  A waiting card swaps the pulsing ink dot for a calm amber dot and shows the wait timer instead: `00:40 waiting`.
   Review / Done shrink to "took 3m" instead of "took 3m 20s" and "done 11/14" instead of "done 11/14 09:20"
   under 190px; when even that does not fit next to the buttons, the footer wraps as a whole and the buttons stay
   right-aligned (the card gets ~30px taller, no word is split).
-- **List**: a flat sortable table, status shown as an inline pill. Medium widths drop the number / duration /
+- **List**: a flat sortable table, status shown as an inline pill (a waiting card reads "Waiting" and its
+  duration cell shows how long it has waited). Medium widths drop the number / duration /
   updated columns; narrow screens keep only Task and Actions.
 - One workspace at a time. The workspace switcher is not a filter — there is no "All workspaces".
 - View and sort order are stored in browser localStorage.
@@ -90,6 +99,10 @@ editor option, and card chip). Reload the plugin or restart DSH, then refresh th
 version 2.
 
 0.6.1 touched only the client (card footer layout in the Running column) — reload the page, no Host restart.
+
+0.7.0 adds "waiting for you" on both halves (Host listens to `ask_user_question` / approval session events,
+client renders the footer, ordering, column count, list pill and session header). Reload the plugin or restart
+DSH, then refresh the page. No new stored fields: `awaiting*` lives in memory only and storage stays at version 2.
 
 ## Reference
 
