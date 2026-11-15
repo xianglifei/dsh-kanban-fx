@@ -39,6 +39,8 @@ const COMPLETION_MODES = new Set(['none', 'prompt'])
 const PROMPT_MAX_CHARS = 4000
 // 收尾提示词刚投递时 agent 可能还没醒；给它比普通 run 更长的宽限，避免 reconcile 误判
 const FINISH_GRACE_MS = 10_000
+// 工作树创建本身有 5 分钟超时；超过这个时长只剩「管道卡住」，兜底清标记让人能重试
+const WORKTREE_PREPARE_MAX_MS = 15 * 60_000
 
 const PACKAGE_VERSION = (() => {
   try {
@@ -174,10 +176,55 @@ function messageTextOf(card) {
 }
 
 function statusOf(card) {
-  if (card.runningSince) return STATUS.RUNNING
+  // 建工作树也是「这一轮已经开始」的一部分：卡片先落到进行中，别让 reconcile 判成结束
+  if (card.runningSince || card.preparingSince) return STATUS.RUNNING
   if (!card.sessionId) return STATUS.TODO
+  // 会话建了却一次都没真的跑起来（投递失败 / 工作树没建成）：它还是待办，不是待审核
+  if (!card.lastRunStartedAt && !card.doneAt) return STATUS.TODO
   if (card.doneAt) return STATUS.DONE
   return STATUS.REVIEW
+}
+
+/** 卡片上的工作树记录：全部字段可缺省，坏数据读盘时回落到「没勾过」。 */
+function normalizeCardWorktree(input) {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
+  const branch = typeof source.branch === 'string' && source.branch ? source.branch : ''
+  const path = typeof source.path === 'string' && source.path ? source.path : ''
+  return {
+    requested: source.requested === true,
+    branch: branch || null,
+    path: path || null,
+    baseCommit: typeof source.baseCommit === 'string' && source.baseCommit ? source.baseCommit : null,
+    repositoryRoot: typeof source.repositoryRoot === 'string' && source.repositoryRoot ? source.repositoryRoot : null,
+    // 进行中的阶段只活在内存里：重启后那次执行已经不在了，残留的阶段只会让卡片卡住
+    phase: null,
+    error: typeof source.error === 'string' && source.error ? textOf(source.error, 400) : null,
+    createdAt: Number(source.createdAt) || null,
+  }
+}
+
+/** 新建卡片时的空记录；`requested` 只由创建 / 编辑接口写。 */
+function blankCardWorktree(requested) {
+  return normalizeCardWorktree({ requested })
+}
+
+// 分支名里的标题片段：只留 ASCII 字母数字，避免中文标题变成一串难读的目录名
+function branchSlugOf(title) {
+  const slug = textOf(title, 120)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24)
+    .replace(/-+$/g, '')
+  return slug
+}
+
+/** 看板自己的命名规则：fx-<编号>[-标题片段]，重试时加 4 位随机后缀。 */
+function worktreeBranchFor(card, retry) {
+  const base = `fx-${Number.isInteger(card.seq) && card.seq > 0 ? card.seq : 'wk'}`
+  if (retry) return `${base}-${randomUUID().replace(/-/g, '').slice(0, 4)}`
+  const slug = branchSlugOf(deriveTitle(card.title, card.body, card.attachments))
+  return slug ? `${base}-${slug}` : base
 }
 
 function normalizeConfig(config) {
@@ -192,7 +239,7 @@ function normalizeConfig(config) {
 }
 
 function defaultUserSettings() {
-  return { completion: { ...DEFAULT_COMPLETION } }
+  return { completion: { ...DEFAULT_COMPLETION }, worktree: { offer: false } }
 }
 
 /**
@@ -204,19 +251,33 @@ function sanitizeUserSettings(input) {
     input && typeof input === 'object' && input.completion && typeof input.completion === 'object' ? input.completion : null
   const prompt = completion ? textOf(completion.prompt, PROMPT_MAX_CHARS).trim() : ''
   const mode = completion && completion.mode === 'prompt' && prompt ? 'prompt' : 'none'
-  return { completion: { mode, prompt } }
+  const worktree =
+    input && typeof input === 'object' && input.worktree && typeof input.worktree === 'object' ? input.worktree : null
+  return {
+    completion: { mode, prompt },
+    // 全局开关只是「卡片上要不要出现这个选项」；能力本身由 DSH 的插件决定
+    worktree: { offer: Boolean(worktree && worktree.offer === true) },
+  }
 }
 
-/** 接口写入用：严格校验，非法值 400，绝不把半截设置写进 board.json。 */
-function userSettingsFromRequest(input) {
+/**
+ * 接口写入用：严格校验，非法值 400，绝不把半截设置写进 board.json。
+ * 两段设置各自可缺省：老客户端只发 completion，新客户端可以只发 worktree。
+ */
+function userSettingsFromRequest(input, current) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw httpError(400, '设置格式不正确')
-  const completion = input.completion
+  const base = current && typeof current === 'object' ? current : defaultUserSettings()
+  const completion = input.completion === undefined ? base.completion : input.completion
   if (!completion || typeof completion !== 'object' || Array.isArray(completion)) throw httpError(400, '缺少完成设置')
   if (!COMPLETION_MODES.has(completion.mode)) throw httpError(400, '完成设置的值不合法')
   const prompt = typeof completion.prompt === 'string' ? completion.prompt.trim() : ''
   if (prompt.length > PROMPT_MAX_CHARS) throw httpError(400, `收尾提示词最多 ${PROMPT_MAX_CHARS} 字符`)
   if (completion.mode === 'prompt' && !prompt) throw httpError(400, '选择发送收尾提示词时，提示词不能为空')
-  return { completion: { mode: completion.mode, prompt } }
+  const worktree = input.worktree === undefined ? base.worktree : input.worktree
+  if (!worktree || typeof worktree !== 'object' || Array.isArray(worktree) || typeof worktree.offer !== 'boolean') {
+    throw httpError(400, '工作树设置的值不合法')
+  }
+  return { completion: { mode: completion.mode, prompt }, worktree: { offer: worktree.offer } }
 }
 
 /** 一张卡片对外（Client）的形状：不含附件字节。 */
@@ -243,6 +304,15 @@ function viewOf(card) {
     status: statusOf(card),
     // 「收尾中」不是第五种状态：status 仍是 running，这里只给 Client 一个派生标识
     finishing: Boolean(card.finishingSince),
+    // 「准备工作树」同理：仍是进行中，只是这一步还没开始跑
+    preparing: Boolean(card.preparingSince),
+    worktree: {
+      requested: Boolean(card.worktree && card.worktree.requested),
+      branch: (card.worktree && card.worktree.branch) || null,
+      path: (card.worktree && card.worktree.path) || null,
+      phase: (card.worktree && card.worktree.phase) || null,
+      error: (card.worktree && card.worktree.error) || null,
+    },
     sessionId: card.sessionId,
     sessionArchived: Boolean(card.sessionArchived),
     runningSince: card.runningSince,
@@ -293,6 +363,9 @@ function loadStore(file) {
         lastRunMs: Number(card.lastRunMs) || null,
         doneAt: Number(card.doneAt) || null,
         finishingSince: Number(card.finishingSince) || null,
+        // 进行中的工作树创建不跨重启：那次执行已经没了，标记留着只会让卡片永远「准备中」
+        preparingSince: null,
+        worktree: normalizeCardWorktree(card.worktree),
         error: typeof card.error === 'string' && card.error ? card.error : null,
       }
     }
@@ -438,6 +511,15 @@ export function apply(ctx, config) {
     }
   }
 
+  /**
+   * DSH 的工作树服务是可选的实验套件：没装时 ctx.get('worktrees') 是 undefined。
+   * 看板只探测、不假装能开关它；探测结果会随 /board 发给设置页做指路文案。
+   */
+  function worktreeService() {
+    const worktrees = ctx.get('worktrees')
+    return worktrees && typeof worktrees.create === 'function' ? worktrees : null
+  }
+
   function archivedSessionIds() {
     const registry = ctx.get('workspaceRegistry')
     const ids = registry?.archivedSessionIds
@@ -579,9 +661,94 @@ export function apply(ctx, config) {
     return { error: lastError }
   }
 
+  /**
+   * 投递前的 worktree 前置：只在这张卡片第一次执行、或者归档后重新执行时发生。
+   *
+   * - 没勾 / 全局入口关掉：什么都不做，卡片照旧在项目目录里跑。
+   * - 已经建过：新会话直接进入同一个检出（切目录是核心服务，不依赖工作树套件）。
+   * - 还没建：调 DSH 的 ctx.worktrees.create，由它按会话权限建分支、检出并切目录。
+   *   建树期间卡片处于 preparingSince，状态是「进行中 · 准备工作树」，reconcile 不猜结束。
+   */
+  async function prepareWorktree(card, agent, createdSession) {
+    const worktree = card.worktree
+    if (!worktree) return
+
+    if (worktree.path) {
+      if (!createdSession) return
+      const wd = ctx.get('workingDirectory')
+      if (!wd || typeof wd.set !== 'function') {
+        throw httpError(503, '当前 DSH 没有工作目录服务，无法进入这张卡片的 worktree')
+      }
+      try {
+        await wd.set(agent, worktree.path)
+      } catch (error) {
+        throw httpError(
+          409,
+          `这张卡片之前的 worktree 目录进不去了（${worktree.path}）：${error?.message ?? error}。可以在会话里恢复工作树，或把卡片改成不使用工作树再执行。`,
+        )
+      }
+      return
+    }
+
+    if (!userSettings.worktree.offer || !worktree.requested) return
+    // 已经在项目目录跑过的卡片不再中途搬进新检出：工作树是「会话开始」的属性，不是随时能换的目录
+    if (card.lastRunStartedAt) return
+
+    const worktrees = worktreeService()
+    if (!worktrees) {
+      throw httpError(
+        409,
+        '当前 DSH 没有工作树服务。请先在「设置 → 插件」启用「变更请求与工作树」，再回来执行这张卡片。',
+      )
+    }
+    if (!card.workspaceId) {
+      throw httpError(409, '这张卡片没有所属工作区，无法确定在哪个仓库新建工作树。先选一个工作区，再执行。')
+    }
+
+    card.preparingSince = Date.now()
+    worktree.phase = 'prepare'
+    worktree.error = null
+    touch(card, 'worktree-prepare')
+
+    let created = null
+    let lastError = null
+    // 上一次失败可能留下同名分支 / 目录；撞车时换一个带随机后缀的名字再试一次
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        created = await worktrees.create(agent, { name: worktreeBranchFor(card, attempt > 0) }, undefined, (phase) => {
+          worktree.phase = phase === 'checkout' ? 'checkout' : 'prepare'
+          touch(card, 'worktree-phase')
+        })
+        lastError = null
+        break
+      } catch (error) {
+        lastError = error
+        if (attempt === 0 && /already exists/i.test(String(error?.message ?? ''))) continue
+        break
+      }
+    }
+
+    card.preparingSince = null
+    worktree.phase = null
+
+    if (!created) {
+      worktree.error = textOf(`工作树创建失败：${lastError?.message ?? String(lastError)}`, 400)
+      touch(card, 'worktree-failed')
+      throw httpError(409, worktree.error)
+    }
+
+    worktree.branch = created.branch
+    worktree.path = created.path
+    worktree.baseCommit = created.baseCommit
+    worktree.repositoryRoot = created.repositoryRoot
+    worktree.error = null
+    worktree.createdAt = Date.now()
+    touch(card, 'worktree-ready')
+  }
+
   /** 执行一张卡片：没有会话就建一个（挂到卡片的工作区下），再把内容投进去并开跑。 */
   async function runCard(card) {
-    if (card.runningSince) throw httpError(409, '这个卡片正在运行')
+    if (card.runningSince || card.preparingSince) throw httpError(409, '这个卡片正在运行')
     if (!(card.body || '').trim() && card.attachments.length === 0 && !(card.title || '').trim()) {
       throw httpError(400, '卡片是空的，先写点内容')
     }
@@ -592,6 +759,8 @@ export function apply(ctx, config) {
 
     const archived = archivedSessionIds()
     if (card.sessionId && archived.includes(card.sessionId)) card.sessionId = null
+    // 归档后重新执行 / 会话已经不在了，都要换新会话；新会话需要重新进入卡片记着的那份 worktree
+    let createdSession = !card.sessionId
 
     let agent = null
     if (card.sessionId) {
@@ -629,6 +798,7 @@ export function apply(ctx, config) {
       }
       card.sessionId = created.sessionId
       card.sessionArchived = false
+      createdSession = true
       bySession.set(card.sessionId, card)
       const resolved = await resolveAgent(controller, card.sessionId)
       if (!resolved || !resolved.agent) {
@@ -637,10 +807,14 @@ export function apply(ctx, config) {
       agent = resolved.agent
     }
 
+    // 内容先在本地拼好：空卡片不该先去建一份工作树（建了也用不上）
     const content = await contentOf(card)
     if (content.length === 0) throw httpError(400, '卡片没有可执行的内容')
 
+    // 会话名提前：接下来建工作树失败时，侧边栏里那个空会话也得有个能认的名字
     nameSession(agent.session, card)
+
+    await prepareWorktree(card, agent, createdSession)
 
     // 先记「进行中」：turn/start 事件到达后会覆盖成真实开始时间
     card.runningSince = Date.now()
@@ -698,6 +872,8 @@ export function apply(ctx, config) {
       lastRunMs: null,
       doneAt: null,
       finishingSince: null,
+      preparingSince: null,
+      worktree: blankCardWorktree(userSettings.worktree.offer && input?.worktree?.requested === true),
       error: null,
     }
     store.cards[card.id] = card
@@ -711,12 +887,17 @@ export function apply(ctx, config) {
   async function updateCard(input) {
     const card = store.cards[String(input?.id ?? '')]
     if (!card) throw httpError(404, '卡片不存在')
-    if (card.sessionId) throw httpError(409, '已经执行过的卡片不能再改内容（去会话里继续）')
+    // 只有真的投递过内容的卡片才算「执行过」；建会话 / 建工作树就失败的仍可编辑重试
+    if (card.sessionId && card.lastRunStartedAt) throw httpError(409, '已经执行过的卡片不能再改内容（去会话里继续）')
     const attachments = await saveAttachments(input?.attachments)
     card.title = titleOf(input?.title)
     card.body = textOf(input?.body, configSettings.maxBodyChars)
     card.workspaceId = typeof input?.workspaceId === 'string' && input.workspaceId ? input.workspaceId : null
     card.attachments = attachments
+    // 全局入口关掉时不落这个意图：执行时也不会建，别在卡片上留一个说不清的勾
+    if (!card.worktree || !card.worktree.path) {
+      card.worktree = blankCardWorktree(userSettings.worktree.offer && input?.worktree?.requested === true)
+    }
     if (card.workspaceId) store.lastWorkspaceId = card.workspaceId
     touch(card, 'update')
     return card
@@ -840,7 +1021,7 @@ export function apply(ctx, config) {
 
   function removeCard(input) {
     const card = cardOf(input)
-    if (card.runningSince) throw httpError(409, '正在运行的卡片不能删除')
+    if (card.runningSince || card.preparingSince) throw httpError(409, '正在运行的卡片不能删除')
     delete store.cards[card.id]
     if (card.sessionId) bySession.delete(card.sessionId)
     changed('delete')
@@ -858,6 +1039,18 @@ export function apply(ctx, config) {
       if (card.sessionId && archived.includes(card.sessionId) && !card.sessionArchived) {
         card.sessionArchived = true
         dirty = true
+      }
+      // 准备工作树：这是执行流程的一部分，创建结束会自己清标记；不要在这里猜它结束
+      if (card.preparingSince) {
+        if (now - card.preparingSince < WORKTREE_PREPARE_MAX_MS) continue
+        // 只可能是创建管道卡住了：清掉标记，卡片回待办，错误留着说明怎么重试
+        card.preparingSince = null
+        if (card.worktree) {
+          card.worktree.phase = null
+          card.worktree.error = '工作树创建超时，请再执行一次'
+        }
+        dirty = true
+        continue
       }
       // 收尾中：给足 10s 让 agent 醒过来；确认它没在跑就回待审核，绝不猜成功。
       if (card.finishingSince) {
@@ -977,12 +1170,14 @@ export function apply(ctx, config) {
       cards: Object.values(store.cards).sort((a, b) => a.createdAt - b.createdAt).map(viewOf),
       workspaces,
       defaultWorkspaceId,
-      settings: { completion: { ...userSettings.completion } },
+      settings: { completion: { ...userSettings.completion }, worktree: { ...userSettings.worktree } },
       advanced: {
         version: PACKAGE_VERSION,
         dataDir,
         storeFile,
         storeVersion: STORE_VERSION,
+        // 设置页据此决定「工作树」开关能不能点，以及要不要指路去插件页
+        capabilities: { worktrees: Boolean(worktreeService()) },
         limits: {
           maxBodyChars: configSettings.maxBodyChars,
           maxCardAttachmentBytes: configSettings.maxCardAttachmentBytes,
@@ -1126,7 +1321,7 @@ export function apply(ctx, config) {
 
     if (req.method === 'POST' && path === `${PREFIX}/settings`) {
       const body = await readJson(req)
-      const next = userSettingsFromRequest(body.settings)
+      const next = userSettingsFromRequest(body.settings, userSettings)
       userSettings = next
       store.settings = next
       broadcast('settings')

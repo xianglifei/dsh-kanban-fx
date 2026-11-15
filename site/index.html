@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>任务看板 · 点执行就开跑 — DeepSeek Harness 插件</title>
-<meta name="description" content="给 DeepSeek Harness 做的任务看板插件：待办、进行中、待审核、已完成四列跟着会话走。点「执行」直接在那个工作区开会话并开跑，不经过新建会话页。">
+<meta name="description" content="给 DeepSeek Harness 做的任务看板插件：待办、进行中、待审核、已完成四列跟着会话走。点「执行」直接在那个工作区开会话并开跑，不经过新建会话页；可选让每张卡在自己的 Git worktree 里干活。">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#f4f4f1">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="任务看板 · dsh-kanban-fx">
 <meta property="og:title" content="任务看板 · 点执行就开跑">
-<meta property="og:description" content="给 DeepSeek Harness 的看板插件：想法进看板，点执行直接开会话开跑，状态跟着会话走。">
+<meta property="og:description" content="给 DeepSeek Harness 的看板插件：想法进看板，点执行直接开会话开跑，状态跟着会话走；可选在独立 Git worktree 里执行。">
 <meta property="og:url" content="https://xianglifei.github.io/dsh-kanban-fx/">
 <meta property="og:image" content="https://xianglifei.github.io/dsh-kanban-fx/assets/og.png">
 <meta property="og:image:width" content="1200">
@@ -45,8 +45,8 @@
   "name": "任务看板 · dsh-kanban-fx",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux, Windows",
-  "softwareVersion": "0.5.1",
-  "description": "DeepSeek Harness 的任务看板插件：四列跟着会话走，点执行直接开会话开跑。",
+  "softwareVersion": "0.6.1",
+  "description": "DeepSeek Harness 的任务看板插件：四列跟着会话走，点执行直接开会话开跑；可选在独立 Git worktree 里执行。",
   "url": "https://xianglifei.github.io/dsh-kanban-fx/",
   "downloadUrl": "https://github.com/xianglifei/dsh-kanban-fx",
   "codeRepository": "https://github.com/xianglifei/dsh-kanban-fx",
@@ -109,7 +109,7 @@
     <div class="hero-dots" aria-hidden="true"></div>
     <div class="wrap hero-grid">
       <div class="hero-copy">
-        <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span>DSH Web 插件 · v0.5.1</p>
+        <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span>DSH Web 插件 · v0.6.1</p>
         <h1 id="hero-title">想法进看板，<br><span class="hl">点执行就开跑。</span></h1>
         <p class="lead">给 DeepSeek Harness 做的任务看板：待办、进行中、待审核、已完成四列跟着会话走。点卡片上的「执行」，插件直接在那个工作区建会话、把卡片内容投进去并立刻开跑——不经过新建会话页。</p>
         <div class="hero-actions">
@@ -274,7 +274,7 @@
           <span class="flow-flag">已完成</span>
         </li>
       </ol>
-      <p class="flow-note reveal"><span class="mono">收尾中</span> 不是第五种状态：它仍算进行中，列、排序、筛选、计数都不变，只是文案和圆点换成收尾。窄屏下四列会收成「状态分段 + 单列」，流程顺序不变。</p>
+      <p class="flow-note reveal"><span class="mono">收尾中</span> 不是第五种状态：它仍算进行中，列、排序、筛选、计数都不变，只是文案和圆点换成收尾。窄屏下四列会收成「状态分段 + 单列」，流程顺序不变；列被挤窄时卡片脚部不折行：收起<span class="mono">开始于 …</span>、把「用时 3 分 20 秒」缩成「用时 3 分」，再放不下就让按钮整排换到下一行。</p>
     </div>
   </section>
 
@@ -510,8 +510,8 @@
           <aside class="upgrade-note" aria-label="升级提示">
             <div class="upgrade-ico">!</div>
             <div>
-              <h3>从 0.4.x 升到 0.5.0？</h3>
-              <p>刷新页面只更新 Client 半。先在 DSH 里把「任务看板」禁用再启用（或重启 DSH），新的 Host <span class="mono">/settings</span> 路由才会加载；看板数据不受影响，重载前把设置页草稿复制出来。0.5.1 只改了 Client 的视图切换样式，刷新页面即可，不需要重载 Host。</p>
+              <h3>升级后要注意什么？</h3>
+              <p>刷新页面只更新 Client 半。先在 DSH 里把「任务看板」禁用再启用（或重启 DSH），新的 Host 代码才会加载；看板数据不受影响，重载前把设置页草稿复制出来。0.6.0 两半都改了（卡片级工作树），要用它还得在插件页启用 DSH 的「变更请求与工作树」并重启；不启用时功能只是灰着。0.5.1 只改了 Client 的视图切换样式，刷新页面即可。</p>
             </div>
           </aside>
         </div>
@@ -554,6 +554,10 @@
         <details>
           <summary>点「完成」之后，还能再补一句吗？<span class="faq-plus" aria-hidden="true"></span></summary>
           <div class="faq-body"><p>默认「什么都不做」：点完成立即移入已完成，可以撤销。如果开启「发送一条收尾提示词」，卡片会进入进行中并显示「收尾中」，这一轮正常结束才自动完成；报错或中止回待审核，可以再点一次完成重试。收尾期间又去会话里补话，自动完成会落在下一轮（v1 不区分哪条是收尾消息）。</p></div>
+        </details>
+        <details>
+          <summary>「独立工作树」是什么？要额外装什么？<span class="faq-plus" aria-hidden="true"></span></summary>
+          <div class="faq-body"><p>0.6.0 的实验功能：设置里打开入口后，新建 / 编辑卡片可以勾选「在独立 worktree 中运行」。第一次执行会在仓库 <span class="mono">.agents/worktrees/</span> 下新建分支与检出，让这张卡自己干活；源目录里未提交的改动不会复制过去。看板不自己实现 Git worktree，用的是 DSH 自带的服务——先去 DSH 的「设置 → 插件」启用「变更请求与工作树」并重启，否则开关是灰的。检出清理、恢复、diff 和 PR 都归 DSH 的 Forge 面板。</p></div>
         </details>
         <details>
           <summary>能拖拽排序、自定义列，或者在看板里直接聊天吗？<span class="faq-plus" aria-hidden="true"></span></summary>
@@ -634,8 +638,8 @@
     </nav>
     <div class="footer-col">
       <h3>版本</h3>
-      <p class="footer-ver"><span class="live-dot" aria-hidden="true"></span>v0.5.1</p>
-      <p class="footer-fine">最近更新 2026-11-14<br>视图切换轻量化</p>
+      <p class="footer-ver"><span class="live-dot" aria-hidden="true"></span>v0.6.1</p>
+      <p class="footer-fine">最近更新 2026-11-15<br>进行中卡片不再折行</p>
       <a class="text-link small" href="https://github.com/xianglifei/dsh-kanban-fx/commits/main" target="_blank" rel="noreferrer">提交记录<svg class="ic" aria-hidden="true"><use href="#i-external"/></svg></a>
     </div>
   </div>

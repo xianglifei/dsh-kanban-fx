@@ -478,13 +478,24 @@ window.__ModuleLoader__.load({
 }
 .fxk-chip-warn { background: color-mix(in srgb, var(--fxk-warn) 14%, transparent); color: color-mix(in srgb, var(--fxk-warn) 40%, var(--fxk-text)); }
 .fxk-chip-err { background: color-mix(in srgb, var(--fxk-err) 12%, transparent); color: color-mix(in srgb, var(--fxk-err) 55%, var(--fxk-text)); }
-.fxk-card-foot { display: flex; align-items: center; gap: 8px; min-height: 24px; }
-.fxk-card-foot-spacer { flex: 1; }
+.fxk-chip-branch { background: color-mix(in srgb, var(--fxk-brand) 10%, transparent); color: color-mix(in srgb, var(--fxk-brand) 55%, var(--fxk-text)); font-family: var(--fxk-mono); }
+/* 脚部自己是一层容器：列多窄就查多窄，收起 / 缩短只看这一行还剩多少位置，
+   和整个面板的宽度无关（单列窄屏时列其实是整屏宽）。
+   文字块一律不折行：提示、计时、按钮谁也不许被压成两行；一行放不下就整组换到下一行（按钮靠右），
+   卡片高一点，总比「运行中」被压成竖排好看。 */
+.fxk-card-foot { display: flex; align-items: center; gap: 8px; min-height: 24px; flex-wrap: wrap; container-type: inline-size; }
+.fxk-card-foot > .fxk-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fxk-card-foot > .fxk-mini { flex: none; }
+/* 不用占位 span（它自己换行时会多出一条空行）：靠右交给自动外边距 ——
+   按钮组由第一个按钮顶到右边，只剩下「计时 + 开始于」时由最后那个提示顶到右边。 */
+.fxk-card-foot > .fxk-mini:first-of-type { margin-left: auto; }
+.fxk-card-foot > .fxk-hint:last-child { margin-left: auto; }
 .fxk-mini {
   height: 24px; padding: 0 9px; border-radius: 7px;
   border: 1px solid var(--fxk-border); background: transparent;
   font-size: 11.5px; line-height: 1; color: var(--fxk-text-2); cursor: pointer;
   display: inline-flex; align-items: center; gap: 5px;
+  white-space: nowrap;
   transition: background 120ms, border-color 120ms, color 120ms;
 }
 .fxk-mini:hover { background: var(--fxk-hover); color: var(--fxk-text); }
@@ -492,9 +503,34 @@ window.__ModuleLoader__.load({
 .fxk-mini-ok:hover { background: color-mix(in srgb, var(--fxk-ok) 12%, transparent); color: var(--fxk-ok-ink); }
 .fxk-mini-run { color: var(--fxk-text); border-color: color-mix(in srgb, var(--fxk-brand) 26%, var(--fxk-border)); }
 .fxk-mini-run:hover { background: color-mix(in srgb, var(--fxk-brand) 10%, transparent); }
-.fxk-timer { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; line-height: 18px; color: var(--fxk-text-2); font-variant-numeric: tabular-nums; }
+/* 计时 + 状态文案是一整块：white-space: nowrap 让「运行中 / 收尾中」的最小宽度等于整词宽度，
+   flex 就不会把它压成每行一个字（CJK 的 min-content 是一个字）。 */
+.fxk-timer { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; line-height: 18px; color: var(--fxk-text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fxk-timer b { font-weight: 600; color: var(--fxk-text); font-family: var(--fxk-mono); font-size: 12px; }
 .fxk-finishing-label { color: var(--fxk-text); font-weight: 560; }
+/* 「开始于 月日 时:分」是次要信息：位置不够就整段收起来，优先保住状态文案一行。
+   阈值 = 计时（1:03:07 这种也留了位置）+ 两侧 8px 间距 + 这段文字的实际宽度上限；
+   中英文宽度差得多（wrapping up 比「运行中」宽 35px），所以英文单独一个更高的阈值。
+   阈值是照着真实字体量出来的，超出阈值还没收起的极窄区间里留 ellipsis 兜底。 */
+@container (max-width: 230px) {
+  .fxk-foot-since { display: none; }
+}
+@container (max-width: 260px) {
+  .fxk-foot-since[data-locale="en"] { display: none; }
+}
+/* 待审核的「用时」和已完成的「完成于」在窄列只留一个单位（用时 3 分 20 秒 → 用时 3 分；
+   完成于 11/14 09:20 → 完成于 11/14）。190px = 最长的「完成于 12/31 23:59」+ 间距 +「↩ 撤销」
+   还能排成一行的宽度，所以缩短之前不会换行。 */
+.fxk-dual-short { display: none; }
+@container (max-width: 190px) {
+  .fxk-card-foot .fxk-dual-full { display: none; }
+  .fxk-card-foot .fxk-dual-short { display: inline; }
+}
+/* 比整行还窄的极端情况（英文 wrapping up 在四列并排的下限）：
+   状态词允许收成省略号，宁可让位也不让文字溢出卡片。中文「运行中」在任何布局下都放得下，
+   看不到这个省略号。 */
+.fxk-card-foot .fxk-timer { min-width: 0; }
+.fxk-card-foot .fxk-timer > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .fxk-pulse {
   width: 6px; height: 6px; border-radius: 999px; flex: none;
   background: var(--fxk-brand);
@@ -836,6 +872,27 @@ window.__ModuleLoader__.load({
 .fxk-settings-count[data-over="true"] { color: var(--fxk-err); }
 .fxk-settings-error { margin: 2px 0 0; font-size: 11.5px; line-height: 17px; color: color-mix(in srgb, var(--fxk-err) 85%, var(--fxk-text)); }
 .fxk-settings-note { margin: 12px 0 0; font-size: 11.5px; line-height: 17px; color: var(--fxk-text-3); }
+.fxk-check {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 11px;
+  border: 1px solid var(--fxk-border); border-radius: 10px;
+  background: var(--fxk-surface);
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+}
+.fxk-check:hover { border-color: color-mix(in srgb, var(--fxk-brand) 30%, var(--fxk-border)); }
+.fxk-check[data-checked="true"] { border-color: color-mix(in srgb, var(--fxk-brand) 42%, var(--fxk-border)); background: color-mix(in srgb, var(--fxk-brand) 5%, var(--fxk-surface)); }
+.fxk-check[data-disabled="true"] { cursor: not-allowed; opacity: .6; }
+.fxk-check:focus-within { outline: 2px solid color-mix(in srgb, var(--fxk-link) 70%, transparent); outline-offset: 2px; }
+.fxk-check input { flex: none; width: 15px; height: 15px; margin: 1px 0 0; accent-color: var(--fxk-brand); cursor: inherit; }
+.fxk-check-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fxk-check-title { font-size: 12.5px; line-height: 18px; font-weight: 560; color: var(--fxk-text); }
+.fxk-check-desc { font-size: 11.5px; line-height: 17px; color: var(--fxk-text-2); }
+.fxk-settings-cap {
+  display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
+  margin-top: 12px;
+  font-size: 11.5px; line-height: 17px; color: var(--fxk-text-2);
+}
 .fxk-settings-subhead { margin: 16px 0 2px; font-size: 11.5px; line-height: 17px; font-weight: 560; color: var(--fxk-text-2); }
 .fxk-advanced { display: flex; flex-direction: column; }
 .fxk-advanced-row { display: flex; align-items: center; gap: 16px; padding: 8px 0; border-top: 1px solid var(--fxk-border-soft); font-size: 12px; line-height: 18px; }
@@ -1168,6 +1225,16 @@ window.__ModuleLoader__.load({
       return t(`${hours} 小时 ${minutes % 60} 分`, `${hours}h ${minutes % 60}m`)
     }
 
+    /** 窄列只放得下一个单位：3 分 20 秒 → 3 分，1 小时 12 分 → 1 小时。 */
+    function formatDurationShort(ms) {
+      if (!Number.isFinite(ms) || ms <= 0) return ''
+      const seconds = Math.round(ms / 1000)
+      if (seconds < 60) return t(`${seconds} 秒`, `${seconds}s`)
+      const minutes = Math.floor(seconds / 60)
+      if (minutes < 60) return t(`${minutes} 分`, `${minutes}m`)
+      return t(`${Math.floor(minutes / 60)} 小时`, `${Math.floor(minutes / 60)}h`)
+    }
+
     function clockOf(ms) {
       try {
         return new Date(ms).toLocaleTimeString(isZh() ? 'zh-CN' : 'en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })
@@ -1180,6 +1247,16 @@ window.__ModuleLoader__.load({
       if (!Number.isFinite(ms) || ms <= 0) return ''
       try {
         return new Date(ms).toLocaleString(isZh() ? 'zh-CN' : 'en-US', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      } catch {
+        return ''
+      }
+    }
+
+    /** 只有月日的时钟（窄列用）：11/14。 */
+    function formatClockShort(ms) {
+      if (!Number.isFinite(ms) || ms <= 0) return ''
+      try {
+        return new Date(ms).toLocaleDateString(isZh() ? 'zh-CN' : 'en-US', { month: 'numeric', day: 'numeric' })
       } catch {
         return ''
       }
@@ -1292,6 +1369,39 @@ window.__ModuleLoader__.load({
     function cardSeqLabel(card) {
       const seq = Number(card && card.seq)
       return Number.isInteger(seq) && seq > 0 ? `fx-${seq}` : ''
+    }
+
+    /**
+     * 同一句话的两个长度：宽列说全（用时 3 分 20 秒），窄列只留一个单位（用时 3 分）。
+     * 切换交给脚部的容器查询，不靠 JS 量宽度，所以每秒重绘也不会跳动。
+     */
+    function shortOrFull(full, short) {
+      return [
+        h('span', { key: 'full', className: 'fxk-dual-full' }, full),
+        h('span', { key: 'short', className: 'fxk-dual-short' }, short),
+      ]
+    }
+
+    /**
+     * 卡片上的工作树标识：成功时是分支 chip，失败时是一条警告。
+     * 走 DSH 的工作树服务，分支名与卡片编号（fx-N）对得上。
+     */
+    function worktreeChipOf(card) {
+      const worktree = card && card.worktree ? card.worktree : null
+      if (!worktree) return null
+      if (!worktree.path) {
+        return worktree.error
+          ? h('span', { className: 'fxk-chip fxk-chip-err', title: worktree.error }, t('工作树失败', 'Worktree failed'))
+          : null
+      }
+      return h(
+        'span',
+        {
+          className: 'fxk-chip fxk-chip-branch',
+          title: [worktree.branch, worktree.path].filter(Boolean).join('\n'),
+        },
+        `⎇ ${worktree.branch || t('工作树', 'Worktree')}`,
+      )
     }
 
     function readAsBase64(file) {
@@ -1511,6 +1621,24 @@ window.__ModuleLoader__.load({
         props.notify?.({ text: ok ? t('已复制', 'Copied') : t('复制失败', 'Copy failed') })
       }
 
+      // 工作树：服务在不在由 DSH 的插件决定，看板只能「提供入口」或「不提供」
+      const worktreeAvailable = Boolean(props.capabilities && props.capabilities.worktrees)
+      const worktreeOffer = Boolean(settings && settings.worktree && settings.worktree.offer)
+      const [worktreeSaving, setWorktreeSaving] = useState(false)
+      const [worktreeFailure, setWorktreeFailure] = useState('')
+
+      const toggleWorktree = async (next) => {
+        setWorktreeSaving(true)
+        setWorktreeFailure('')
+        try {
+          await props.onSaveWorktree(next)
+        } catch (saveFailure) {
+          setWorktreeFailure(String(saveFailure?.message ?? saveFailure))
+        } finally {
+          setWorktreeSaving(false)
+        }
+      }
+
       const statusText = disabled
         ? t('看板读取失败，设置暂不可用', 'The board could not be loaded — settings are unavailable')
         : phase === 'saving'
@@ -1698,6 +1826,82 @@ window.__ModuleLoader__.load({
                   ),
                   h(
                     'section',
+                    { key: 'worktree', className: 'fxk-settings-card' },
+                    h('h2', null, t('实验功能', 'Experimental')),
+                    h(
+                      'p',
+                      { className: 'fxk-settings-desc' },
+                      t(
+                        '「独立工作树」基于 DSH 自带的 Git 工作树服务。看板只负责在卡片上给一个入口；建分支、切目录、归档清理都由 DSH 完成。',
+                        'The isolated worktree builds on DSH’s own Git worktree service. The board only adds a per-card entry; creating the branch, switching directories, and archive cleanup all stay in DSH.',
+                      ),
+                    ),
+                    h(
+                      'label',
+                      {
+                        className: 'fxk-check',
+                        'data-checked': String(worktreeOffer),
+                        'data-disabled': String(!worktreeAvailable || disabled),
+                        title: worktreeAvailable
+                          ? undefined
+                          : t('先在「设置 → 插件」启用「变更请求与工作树」', 'Enable “Change requests & worktrees” under Settings → Plugins first'),
+                      },
+                      h('input', {
+                        type: 'checkbox',
+                        checked: worktreeOffer,
+                        disabled: !worktreeAvailable || disabled || worktreeSaving,
+                        'aria-describedby': 'fxk-worktree-offer-desc',
+                        onChange: (event) => void toggleWorktree(event.target.checked),
+                      }),
+                      h(
+                        'span',
+                        { className: 'fxk-check-text' },
+                        h(
+                          'span',
+                          { className: 'fxk-check-title' },
+                          worktreeSaving
+                            ? t('正在保存…', 'Saving…')
+                            : t('在卡片上提供「独立工作树」', 'Offer an isolated worktree on cards'),
+                        ),
+                        h(
+                          'span',
+                          { id: 'fxk-worktree-offer-desc', className: 'fxk-check-desc' },
+                          t(
+                            '打开后，新建或编辑卡片可以勾选在独立 worktree 里运行；第一次执行时会在仓库 .agents/worktrees/ 下新建分支与检出。卡片默认不勾。',
+                            'When on, new or edited cards can run in their own worktree; the first run creates a branch and checkout under .agents/worktrees/. Cards stay unchecked by default.',
+                          ),
+                        ),
+                      ),
+                    ),
+                    worktreeAvailable
+                      ? null
+                      : h(
+                          'div',
+                          { className: 'fxk-settings-cap' },
+                          h('span', { className: 'fxk-chip fxk-chip-warn' }, t('服务未启用', 'Service not enabled')),
+                          h(
+                            'span',
+                            null,
+                            t(
+                              '去「设置 → 插件」启用「变更请求与工作树」，重启后这里就能打开。启用后，看板建的工作树也会出现在会话的 Forge 面板里。',
+                              'Enable “Change requests & worktrees” under Settings → Plugins, then restart to turn this on. Once enabled, the board’s worktrees also show up in the session’s Forge panel.',
+                            ),
+                          ),
+                        ),
+                    worktreeFailure
+                      ? h('p', { className: 'fxk-settings-error', role: 'alert' }, worktreeFailure)
+                      : null,
+                    h(
+                      'p',
+                      { className: 'fxk-settings-note' },
+                      t(
+                        '这个开关只决定卡片上要不要出现选项；某张卡片要不要隔离开，永远由建卡时的那个人决定。',
+                        'This switch only controls whether the option appears on cards; whether a given card needs isolation is always the card author’s call.',
+                      ),
+                    ),
+                  ),
+                  h(
+                    'section',
                     { key: 'advanced', className: 'fxk-settings-card' },
                     h('h2', null, t('高级', 'Advanced')),
                     h(
@@ -1727,6 +1931,10 @@ window.__ModuleLoader__.load({
                         ),
                       ),
                       advancedRow(t('存储版本', 'Storage version'), String(advanced?.storeVersion ?? '—')),
+                      advancedRow(
+                        t('工作树服务', 'Worktree service'),
+                        worktreeAvailable ? t('可用', 'Available') : t('未启用', 'Not enabled'),
+                      ),
                       advancedRow(t('卡片总数', 'Cards'), String(props.cardCount ?? 0)),
                       advancedRow(
                         t('正文字符上限', 'Body limit'),
@@ -1894,6 +2102,28 @@ window.__ModuleLoader__.load({
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ settings: { completion } }),
+          })
+          const payload = await response.json().catch(() => null)
+          if (!response.ok || !payload || payload.ok !== true) {
+            throw new Error(
+              (payload && payload.error) ||
+                t(`设置保存失败（${response.status}）`, `Could not save settings (${response.status})`),
+            )
+          }
+          applyBoard(payload)
+          setError('')
+          return payload
+        },
+        [applyBoard],
+      )
+
+      /** 保存「实验功能」里的工作树入口开关；只发这一段，服务端按当前值合并。 */
+      const saveWorktree = useCallback(
+        async (offer) => {
+          const response = await fetch(`${API}/settings`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ settings: { worktree: { offer: Boolean(offer) } } }),
           })
           const payload = await response.json().catch(() => null)
           if (!response.ok || !payload || payload.ok !== true) {
@@ -2181,7 +2411,8 @@ window.__ModuleLoader__.load({
 
       const openCard = useCallback(
         (card) => {
-          if (!card.sessionId) {
+          // 建了会话但一次都没真的跑起来（投递 / 建工作树失败）：回到编辑，让人能改完重试
+          if (!card.sessionId || !card.lastRunStartedAt) {
             setModal({ mode: 'edit', card })
             return
           }
@@ -2341,6 +2572,7 @@ window.__ModuleLoader__.load({
             { className: 'fxk-card-meta' },
             title ? h('span', { className: 'fxk-chip', title }, title) : null,
             card.workspaceId && !title ? h('span', { className: 'fxk-chip fxk-chip-warn' }, t('工作区不可用', 'Workspace missing')) : null,
+            worktreeChipOf(card),
             attachmentCount ? h('span', { className: 'fxk-chip', title: t('附件', 'Attachments') }, `📎 ${attachmentCount}`) : null,
             card.sessionArchived ? h('span', { className: 'fxk-chip fxk-chip-warn', title: t('会话已归档', 'Conversation archived') }, t('会话已归档', 'Archived')) : null,
             card.error ? h('span', { className: 'fxk-chip fxk-chip-err', title: card.error }, t('有报错', 'Error')) : null,
@@ -2349,20 +2581,38 @@ window.__ModuleLoader__.load({
             ? h(
                 'div',
                 { className: 'fxk-card-foot' },
-                h(
-                  'span',
-                  {
-                    className: 'fxk-timer',
-                    title: card.finishing
-                      ? t('收尾提示词正在跑，跑完自动完成', 'The wrap-up prompt is running; the card completes automatically')
-                      : undefined,
-                  },
-                  h('span', { className: 'fxk-pulse' }),
-                  h('b', null, formatElapsed(elapsedOf(card))),
-                  h('span', { className: card.finishing ? 'fxk-finishing-label' : undefined }, card.finishing ? t('收尾中', 'wrapping up') : t('运行中', 'running')),
-                ),
-                h('span', { className: 'fxk-card-foot-spacer' }),
-                card.lastRunStartedAt ? h('span', { className: 'fxk-hint' }, t(`开始于 ${formatClock(card.lastRunStartedAt)}`, `since ${formatClock(card.lastRunStartedAt)}`)) : null,
+                card.preparing
+                  ? h(
+                      'span',
+                      {
+                        className: 'fxk-timer',
+                        title: t(
+                          '正在新建分支与检出，建好之后才开始跑这一轮',
+                          'Creating the branch and checkout; the run starts when it finishes',
+                        ),
+                      },
+                      h('span', { className: 'fxk-pulse' }),
+                      h('span', { className: 'fxk-finishing-label' }, t('准备工作树…', 'preparing worktree')),
+                    )
+                  : h(
+                      'span',
+                      {
+                        className: 'fxk-timer',
+                        title: card.finishing
+                          ? t('收尾提示词正在跑，跑完自动完成', 'The wrap-up prompt is running; the card completes automatically')
+                          : undefined,
+                      },
+                      h('span', { className: 'fxk-pulse' }),
+                      h('b', null, formatElapsed(elapsedOf(card))),
+                      h('span', { className: card.finishing ? 'fxk-finishing-label' : undefined }, card.finishing ? t('收尾中', 'wrapping up') : t('运行中', 'running')),
+                    ),
+                card.lastRunStartedAt
+                  ? h(
+                      'span',
+                      { className: 'fxk-hint fxk-foot-since', 'data-locale': isZh() ? 'zh' : 'en' },
+                      t(`开始于 ${formatClock(card.lastRunStartedAt)}`, `since ${formatClock(card.lastRunStartedAt)}`),
+                    )
+                  : null,
               )
             : state === 'review'
               ? h(
@@ -2371,9 +2621,13 @@ window.__ModuleLoader__.load({
                   h(
                     'span',
                     { className: 'fxk-hint' },
-                    card.lastRunMs ? t(`用时 ${formatDuration(card.lastRunMs)}`, `took ${formatDuration(card.lastRunMs)}`) : t('已跑完，待你查看', 'Run finished'),
+                    card.lastRunMs
+                      ? shortOrFull(
+                          t(`用时 ${formatDuration(card.lastRunMs)}`, `took ${formatDuration(card.lastRunMs)}`),
+                          t(`用时 ${formatDurationShort(card.lastRunMs)}`, `took ${formatDurationShort(card.lastRunMs)}`),
+                        )
+                      : shortOrFull(t('已跑完，待你查看', 'Run finished'), t('已跑完', 'Finished')),
                   ),
-                  h('span', { className: 'fxk-card-foot-spacer' }),
                   card.sessionArchived
                     ? h(
                         'button',
@@ -2413,8 +2667,16 @@ window.__ModuleLoader__.load({
                 ? h(
                     'div',
                     { className: 'fxk-card-foot' },
-                    h('span', { className: 'fxk-hint' }, card.doneAt ? t(`完成于 ${formatClock(card.doneAt)}`, `done ${formatClock(card.doneAt)}`) : t('已完成', 'Done')),
-                    h('span', { className: 'fxk-card-foot-spacer' }),
+                    h(
+                      'span',
+                      { className: 'fxk-hint' },
+                      card.doneAt
+                        ? shortOrFull(
+                            t(`完成于 ${formatClock(card.doneAt)}`, `done ${formatClock(card.doneAt)}`),
+                            t(`完成于 ${formatClockShort(card.doneAt)}`, `done ${formatClockShort(card.doneAt)}`),
+                          )
+                        : t('已完成', 'Done'),
+                    ),
                     card.sessionArchived
                       ? h(
                           'button',
@@ -2450,7 +2712,6 @@ window.__ModuleLoader__.load({
                     'div',
                     { className: 'fxk-card-foot' },
                     h('span', { className: 'fxk-hint' }, t('还没开始', 'Not started')),
-                    h('span', { className: 'fxk-card-foot-spacer' }),
                     h(
                       'button',
                       {
@@ -2629,10 +2890,14 @@ window.__ModuleLoader__.load({
               {
                 className: 'fxk-state',
                 'data-state': state,
-                title: card.finishing ? t('进行中 · 收尾', 'Running · wrap-up') : undefined,
+                title: card.preparing
+                  ? t('进行中 · 准备工作树', 'Running · preparing worktree')
+                  : card.finishing
+                    ? t('进行中 · 收尾', 'Running · wrap-up')
+                    : undefined,
               },
               h('span', { className: 'fxk-state-dot', 'aria-hidden': 'true' }),
-              h('span', null, card.finishing ? t('收尾中', 'Wrapping up') : statusLabelOf(state)),
+              h('span', null, card.preparing ? t('准备中', 'Preparing') : card.finishing ? t('收尾中', 'Wrapping up') : statusLabelOf(state)),
             ),
           ),
           h('td', { className: 'fxk-td fxk-td-seq c-seq' }, cardSeqLabel(card) || '—'),
@@ -2649,13 +2914,18 @@ window.__ModuleLoader__.load({
                   className: 'fxk-mob-dot',
                   'data-state': state,
                   role: 'img',
-                  'aria-label': card.finishing ? t('收尾中', 'Wrapping up') : statusLabelOf(state),
+                  'aria-label': card.preparing
+                    ? t('准备中', 'Preparing')
+                    : card.finishing
+                      ? t('收尾中', 'Wrapping up')
+                      : statusLabelOf(state),
                 },
               ),
               h('button', { type: 'button', className: 'fxk-title', title: card.title }, card.title),
               attachmentCount
                 ? h('span', { className: 'fxk-att', title: t('附件', 'Attachments') }, `📎 ${attachmentCount}`)
                 : null,
+              worktreeChipOf(card),
               card.error ? h('span', { className: 'fxk-chip fxk-chip-err', title: card.error }, t('有报错', 'Error')) : null,
               card.sessionArchived
                 ? h('span', { className: 'fxk-chip fxk-chip-warn', title: t('会话已归档，可点右侧重新执行', 'Conversation archived — run again on the right') }, t('已归档', 'Archived'))
@@ -2783,12 +3053,14 @@ window.__ModuleLoader__.load({
           h(SettingsPage, {
             settings: board ? board.settings : null,
             advanced: board ? board.advanced : null,
+            capabilities: board && board.advanced ? board.advanced.capabilities : null,
             loading,
             error,
             view,
             sort,
             cardCount: cards.length,
             onSave: saveSettings,
+            onSaveWorktree: saveWorktree,
             onResetView: resetViewPrefs,
             onBack: closeSettings,
             onRetry: () => void load(),
@@ -2926,6 +3198,8 @@ window.__ModuleLoader__.load({
               card: modal.card,
               workspaces,
               defaultWorkspaceId: currentWorkspaceId || null,
+              worktreeOffered: Boolean(board && board.settings && board.settings.worktree && board.settings.worktree.offer),
+              worktreeAvailable: Boolean(board && board.advanced && board.advanced.capabilities && board.advanced.capabilities.worktrees),
               post,
               notify,
               onSaved: handleSaved,
@@ -2977,7 +3251,7 @@ window.__ModuleLoader__.load({
 
     // ---------------------------------------------------------------- editor
     function Editor(props) {
-      const { mode, card, workspaces, defaultWorkspaceId, post, notify, onSaved, onClose } = props
+      const { mode, card, workspaces, defaultWorkspaceId, worktreeOffered, worktreeAvailable, post, notify, onSaved, onClose } = props
       // 只回填用户手写的标题；派生标题留空，由占位符和下面的会话名预览兜住
       const [title, setTitle] = useState(card ? (typeof card.titleInput === 'string' ? card.titleInput : card.title) : '')
       const [body, setBody] = useState(card ? card.body : '')
@@ -2988,6 +3262,8 @@ window.__ModuleLoader__.load({
           ? card.workspaceId
           : defaultWorkspaceId || (workspaces[0] && workspaces[0].id) || ''
       const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId)
+      // 工作树意图跟着卡片走；默认不勾，只有建卡的人显式打开才生效
+      const [worktreeRequested, setWorktreeRequested] = useState(Boolean(card && card.worktree && card.worktree.requested))
       const [kept, setKept] = useState(card && Array.isArray(card.attachments) ? card.attachments : [])
       const [added, setAdded] = useState([])
       const [busy, setBusy] = useState('')
@@ -3011,7 +3287,7 @@ window.__ModuleLoader__.load({
       const changeRef = useRef(0)
       const timerRef = useRef(null)
       const latest = useRef({})
-      latest.current = { title, body, workspaceId, kept, added }
+      latest.current = { title, body, workspaceId, worktreeRequested, kept, added }
 
       /** 真正落库一次：create 或 update；返回 { card, created }。 */
       const persist = useCallback(
@@ -3030,6 +3306,7 @@ window.__ModuleLoader__.load({
                 title: state.title.trim(),
                 body: state.body,
                 workspaceId: state.workspaceId || null,
+                worktree: { requested: Boolean(state.worktreeRequested) },
                 attachments: attachmentPayloadOf(state),
               }
               // update 的 id 要放进 card 里：Host 的 updateCard 读的是 card.id
@@ -3470,6 +3747,67 @@ window.__ModuleLoader__.load({
                   : t('先在 DSH 里创建一个工作区，再回来建待办。', 'Create a workspace in DSH first, then come back.'),
               ),
             ),
+            // 工作树：只在「设置里给了入口 + DSH 服务在 + 这张卡还没执行过」时出现
+            worktreeOffered && worktreeAvailable && (!card || !card.sessionId)
+              ? h(
+                  'div',
+                  { className: 'fxk-field' },
+                  h(
+                    'label',
+                    { className: 'fxk-check', 'data-checked': String(worktreeRequested), 'data-disabled': String(!workspaceId) },
+                    h('input', {
+                      type: 'checkbox',
+                      checked: worktreeRequested,
+                      disabled: !workspaceId,
+                      'aria-describedby': 'fxk-worktree-card-desc',
+                      onChange: (event) => {
+                        setWorktreeRequested(event.target.checked)
+                        markDirty()
+                      },
+                    }),
+                    h(
+                      'span',
+                      { className: 'fxk-check-text' },
+                      h('span', { className: 'fxk-check-title' }, t('在独立 worktree 中运行', 'Run in an isolated worktree')),
+                      h(
+                        'span',
+                        { id: 'fxk-worktree-card-desc', className: 'fxk-check-desc' },
+                        t(
+                          '第一次执行时新建分支与检出，会话目录切过去；源目录里未提交的改动不会带过去。',
+                          'The first run creates a branch and checkout and switches the conversation there; uncommitted changes stay in the source checkout.',
+                        ),
+                      ),
+                    ),
+                  ),
+                  h(
+                    'div',
+                    { className: 'fxk-hint' },
+                    workspaceId
+                      ? t(
+                          `分支名形如 ${savedSeq ? `fx-${savedSeq}` : 'fx-<编号>'}-<标题片段>，目录在仓库 .agents/worktrees/ 下。`,
+                          `Branches look like ${savedSeq ? `fx-${savedSeq}` : 'fx-<number>'}-<title-slug> under .agents/worktrees/ in the repository.`,
+                        )
+                      : t('先选一个工作区，才能确定在哪个仓库建工作树。', 'Pick a workspace first so the board knows which repository to use.'),
+                  ),
+                  card && card.worktree && card.worktree.error
+                    ? h('div', { className: 'fxk-err', role: 'alert' }, card.worktree.error)
+                    : null,
+                )
+              : card && card.worktree && card.worktree.requested
+                ? h(
+                    'div',
+                    { className: 'fxk-hint' },
+                    worktreeAvailable
+                      ? t(
+                          '这张卡片勾过「独立工作树」，但设置里已经关掉了这个入口；执行时不会新建工作树。',
+                          'This card asked for an isolated worktree, but the option is turned off in Settings; running it will not create one.',
+                        )
+                      : t(
+                          '这张卡片勾过「独立工作树」，但 DSH 没有启用工作树服务；执行时不会新建工作树。',
+                          'This card asked for an isolated worktree, but DSH’s worktree service is not enabled; running it will not create one.',
+                        ),
+                  )
+                : null,
             error ? h('div', { className: 'fxk-err', role: 'alert' }, error) : null,
           ),
           h(
