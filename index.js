@@ -17,6 +17,7 @@
  * 只依赖 node 内置模块与 ctx 上的服务。消息体按 DSH 的 UserMessage 结构就地构造
  * （{id, role:'user', content, source:{kind:'user'}}），与 createUserMessage 等价。
  */
+import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -43,6 +44,22 @@ const PROMPT_MAX_CHARS = 4000
 const FINISH_GRACE_MS = 10_000
 // 工作树创建本身有 5 分钟超时；超过这个时长只剩「管道卡住」，兜底清标记让人能重试
 const WORKTREE_PREPARE_MAX_MS = 15 * 60_000
+
+// 「分支合并了没有」只能观测，不能推理：每仓库最多问一次 Git，同一仓库 60 秒内复用结果。
+// 只读命令（for-each-ref / rev-list），不写任何东西，也不 fetch。
+const MERGE_PROBE_TTL_MS = 60_000
+const MERGE_PROBE_TIMEOUT_MS = 3_000
+const MERGE_PROBE_MAX_BYTES = 64 * 1024
+const MERGE_STATES = new Set(['unmerged', 'merged', 'empty', 'unknown'])
+// Git 的这几个环境变量会把「在哪个仓库跑」指到别处：探测时一律清掉
+const GIT_ENV_CLEAN = Object.fromEntries(
+  [
+    'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT',
+    'GIT_CEILING_DIRECTORIES', 'GIT_PREFIX', 'GIT_SHALLOW_FILE', 'GIT_GRAFT_FILE',
+    'GIT_REPLACE_REF_BASE', 'GIT_ATTR_SOURCE',
+  ].map((key) => [key, undefined]),
+)
 
 const PACKAGE_VERSION = (() => {
   try {
@@ -202,7 +219,159 @@ function normalizeCardWorktree(input) {
     phase: null,
     error: typeof source.error === 'string' && source.error ? textOf(source.error, 400) : null,
     createdAt: Number(source.createdAt) || null,
+    merge: normalizeCardMerge(source.merge),
   }
+}
+
+/**
+ * 分支合并状态的观测记录。
+ * 分支名 / 提交号都是 Git 的事实，`state` 只记最后一次真的看到的结果：
+ * unmerged（有提交没被别的分支包含）/ merged（被某个分支包含）/ empty（分支上没有提交）/
+ * unknown（第一次看到时分支就已经没了，无从判断）。
+ * `gone` 是「现在分支不在了」，`observedAt` 是这个结论记于何时，`goneAt` 是第一次发现它没了。
+ */
+function normalizeCardMerge(input) {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
+  const state = MERGE_STATES.has(source.state) ? source.state : null
+  if (!state) return null
+  const ahead = Number(source.ahead)
+  return {
+    state,
+    gone: source.gone === true,
+    into: typeof source.into === 'string' && source.into ? textOf(source.into, 200) : null,
+    ahead: Number.isFinite(ahead) && ahead >= 0 ? Math.floor(ahead) : null,
+    observedAt: Number(source.observedAt) || null,
+    goneAt: Number(source.goneAt) || null,
+  }
+}
+
+/** 一次只读 Git 调用：不带 shell、固定超时与输出上限；失败直接抛给调用方。 */
+function readGit(repositoryRoot, args) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'git',
+      args,
+      {
+        cwd: repositoryRoot,
+        timeout: MERGE_PROBE_TIMEOUT_MS,
+        maxBuffer: MERGE_PROBE_MAX_BYTES,
+        windowsHide: true,
+        env: { ...process.env, ...GIT_ENV_CLEAN, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', GIT_PAGER: 'cat' },
+      },
+      (error, stdout) => {
+        if (error) reject(error)
+        else resolve(String(stdout))
+      },
+    )
+  })
+}
+
+/** `refs/heads/main` → `main`；`refs/remotes/origin/main` → `origin/main`。 */
+function shortRefName(ref) {
+  if (ref.startsWith('refs/heads/')) return ref.slice('refs/heads/'.length)
+  if (ref.startsWith('refs/remotes/')) return ref.slice('refs/remotes/'.length)
+  return ref
+}
+
+/** 分支名 / 提交号要直接进 argv：先挡掉选项注入和奇怪字符。 */
+function safeBranchName(value) {
+  if (typeof value !== 'string') return null
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(value)) return null
+  return value.includes('..') ? null : value
+}
+
+function safeObjectName(value) {
+  return typeof value === 'string' && /^[0-9a-f]{7,64}$/i.test(value) ? value : null
+}
+
+/** `for-each-ref --format='%(refname) %(objectname)'` 的两列输出。 */
+function parseRefs(output) {
+  const refs = new Map()
+  for (const line of output.split('\n')) {
+    const text = line.trim()
+    if (!text) continue
+    const gap = text.indexOf(' ')
+    if (gap <= 0) continue
+    refs.set(text.slice(0, gap), text.slice(gap + 1).trim())
+  }
+  return refs
+}
+
+/** 合并进哪一个分支：优先本地分支，名字排序保证同一个事实每次显示一致。 */
+function mergeTargetOf(refs) {
+  const locals = refs.filter((ref) => ref.startsWith('refs/heads/')).map(shortRefName).sort()
+  if (locals.length > 0) return locals[0]
+  const remotes = refs.map(shortRefName).sort()
+  return remotes[0] || null
+}
+
+/** 只比「事实」：状态、分支在不在、并进哪个分支、有几个提交。任何一个变了才写盘。 */
+function sameMerge(left, right) {
+  if (!left || !right) return !left && !right
+  return (
+    left.state === right.state &&
+    Boolean(left.gone) === Boolean(right.gone) &&
+    (left.into || null) === (right.into || null) &&
+    (left.ahead ?? null) === (right.ahead ?? null)
+  )
+}
+
+/**
+ * 观测一张卡片的分支：
+ * - 分支不在了 → 沿用上次结论并标 gone；从没见过这个分支就记 unknown；
+ * - 分支 tip 就是建树时的提交 → empty（没提交可合并）；
+ * - tip 被别的 ref 包含 → merged，`into` 记被谁包含；
+ * - 否则 → unmerged。
+ * 观测不出来（Git 报错）返回 null：调用方保留上一次结论，不清空。
+ */
+async function probeCardMerge(repositoryRoot, card, refs) {
+  const worktree = card.worktree
+  const branch = safeBranchName(worktree.branch)
+  if (!branch) return null
+  const branchRef = `refs/heads/${branch}`
+  const tip = refs.get(branchRef) || null
+  const previous = worktree.merge || null
+  if (!tip) {
+    return {
+      state: previous && previous.state ? previous.state : 'unknown',
+      gone: true,
+      into: previous ? previous.into : null,
+      ahead: previous ? previous.ahead : null,
+      observedAt: previous ? previous.observedAt : null,
+      goneAt: previous && previous.gone && previous.goneAt ? previous.goneAt : Date.now(),
+    }
+  }
+  const baseCommit = safeObjectName(worktree.baseCommit)
+  if (baseCommit && baseCommit === tip) {
+    return { state: 'empty', gone: false, into: null, ahead: 0, observedAt: Date.now(), goneAt: null }
+  }
+  let ahead = null
+  if (baseCommit) {
+    try {
+      const count = Number((await readGit(repositoryRoot, ['rev-list', '--count', `${baseCommit}..${tip}`])).trim())
+      if (Number.isFinite(count) && count >= 0) ahead = count
+    } catch {}
+  }
+  let containing = []
+  try {
+    const output = await readGit(repositoryRoot, [
+      'for-each-ref',
+      `--contains=${tip}`,
+      '--format=%(refname)',
+      'refs/heads',
+      'refs/remotes',
+    ])
+    containing = output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((ref) => ref && ref !== branchRef)
+  } catch {
+    return null
+  }
+  if (containing.length > 0) {
+    return { state: 'merged', gone: false, into: mergeTargetOf(containing), ahead, observedAt: Date.now(), goneAt: null }
+  }
+  return { state: 'unmerged', gone: false, into: null, ahead, observedAt: Date.now(), goneAt: null }
 }
 
 /** 新建卡片时的空记录；`requested` 只由创建 / 编辑接口写。 */
@@ -241,7 +410,7 @@ function normalizeConfig(config) {
 }
 
 function defaultUserSettings() {
-  return { completion: { ...DEFAULT_COMPLETION }, worktree: { offer: false } }
+  return { completion: { ...DEFAULT_COMPLETION }, worktree: { offer: false, mergeState: true } }
 }
 
 /**
@@ -257,8 +426,9 @@ function sanitizeUserSettings(input) {
     input && typeof input === 'object' && input.worktree && typeof input.worktree === 'object' ? input.worktree : null
   return {
     completion: { mode, prompt },
-    // 全局开关只是「卡片上要不要出现这个选项」；能力本身由 DSH 的插件决定
-    worktree: { offer: Boolean(worktree && worktree.offer === true) },
+    // 全局开关只是「卡片上要不要出现这个选项」；能力本身由 DSH 的插件决定。
+    // mergeState 默认开：没写过这个字段的老设置也要能检测合并状态。
+    worktree: { offer: Boolean(worktree && worktree.offer === true), mergeState: !(worktree && worktree.mergeState === false) },
   }
 }
 
@@ -276,10 +446,15 @@ function userSettingsFromRequest(input, current) {
   if (prompt.length > PROMPT_MAX_CHARS) throw httpError(400, `收尾提示词最多 ${PROMPT_MAX_CHARS} 字符`)
   if (completion.mode === 'prompt' && !prompt) throw httpError(400, '选择发送收尾提示词时，提示词不能为空')
   const worktree = input.worktree === undefined ? base.worktree : input.worktree
-  if (!worktree || typeof worktree !== 'object' || Array.isArray(worktree) || typeof worktree.offer !== 'boolean') {
+  if (!worktree || typeof worktree !== 'object' || Array.isArray(worktree)) {
     throw httpError(400, '工作树设置的值不合法')
   }
-  return { completion: { mode: completion.mode, prompt }, worktree: { offer: worktree.offer } }
+  const currentWorktree = base && base.worktree && typeof base.worktree === 'object' ? base.worktree : {}
+  const offer = worktree.offer === undefined ? Boolean(currentWorktree.offer === true) : worktree.offer
+  if (typeof offer !== 'boolean') throw httpError(400, '工作树设置的值不合法')
+  const mergeState = worktree.mergeState === undefined ? currentWorktree.mergeState !== false : worktree.mergeState
+  if (typeof mergeState !== 'boolean') throw httpError(400, '合并状态设置的值不合法')
+  return { completion: { mode: completion.mode, prompt }, worktree: { offer, mergeState } }
 }
 
 /** 一张卡片对外（Client）的形状：不含附件字节。 */
@@ -317,6 +492,7 @@ function viewOf(card) {
       path: (card.worktree && card.worktree.path) || null,
       phase: (card.worktree && card.worktree.phase) || null,
       error: (card.worktree && card.worktree.error) || null,
+      merge: card.worktree && card.worktree.merge ? { ...card.worktree.merge } : null,
     },
     sessionId: card.sessionId,
     sessionArchived: Boolean(card.sessionArchived),
@@ -528,6 +704,106 @@ export function apply(ctx, config) {
   function worktreeService() {
     const worktrees = ctx.get('worktrees')
     return worktrees && typeof worktrees.create === 'function' ? worktrees : null
+  }
+
+  // ---- 分支合并状态：只读观测，60 秒一个仓库一次 -----------------------------
+  /** card.id → 最近一次探测（成功 / 失败）；只活在内存里，用来标「暂时检测不到」。 */
+  const mergeProbeAt = new Map()
+  /** repositoryRoot → 上次真的问 Git 的时间，节流用。 */
+  const repoProbeAt = new Map()
+  let mergeTimer = null
+  let mergeRunning = false
+  // 探测进行中又被叫了一次：记下来，跑完补一轮（卡片刚点完成时不能等 60 秒）
+  let mergeAgain = false
+
+  function mergeDetectionOn() {
+    return userSettings.worktree.mergeState === true
+  }
+
+  /** 合并探测永远不挡请求：排一个定时器，到点自己跑，出错也不冒泡到路由。 */
+  function scheduleMergeProbe(delay = 0) {
+    if (!mergeDetectionOn() || mergeTimer) return
+    mergeTimer = setTimeout(() => {
+      mergeTimer = null
+      void probeMergeStates()
+    }, delay)
+    if (typeof mergeTimer.unref === 'function') mergeTimer.unref()
+  }
+
+  /** 这张卡刚换了状态：清掉仓库节流，让下一次探测立刻重新问。 */
+  function forceMergeProbe(card) {
+    const repo = card && card.worktree ? card.worktree.repositoryRoot : null
+    if (repo) repoProbeAt.delete(repo)
+    scheduleMergeProbe(400)
+  }
+
+  function mergeViewOf(view) {
+    if (!view || !view.worktree) return view
+    const probe = mergeProbeAt.get(view.id)
+    view.worktree.probe = probe ? { at: probe.at, error: probe.error } : null
+    return view
+  }
+
+  async function probeMergeStates() {
+    if (!mergeDetectionOn()) return
+    if (mergeRunning) {
+      mergeAgain = true
+      return
+    }
+    mergeRunning = true
+    try {
+      // 只观测「待审核 / 已完成」的卡：跑的时候说这些没意义，还平白多问 Git
+      const byRepo = new Map()
+      for (const card of Object.values(store.cards)) {
+        const worktree = card.worktree
+        if (!worktree || !worktree.branch || !worktree.repositoryRoot) continue
+        const status = statusOf(card)
+        if (status !== STATUS.REVIEW && status !== STATUS.DONE) continue
+        if (!byRepo.has(worktree.repositoryRoot)) byRepo.set(worktree.repositoryRoot, [])
+        byRepo.get(worktree.repositoryRoot).push(card)
+      }
+      let changedAny = false
+      for (const [repositoryRoot, cards] of byRepo) {
+        const last = repoProbeAt.get(repositoryRoot) || 0
+        if (Date.now() - last < MERGE_PROBE_TTL_MS) continue
+        repoProbeAt.set(repositoryRoot, Date.now())
+        let refs = null
+        let failure = null
+        // 仓库被删 / 被挪走时给个人话，别把 spawn ENOENT 直接甩到 tooltip 里
+        if (!existsSync(repositoryRoot)) {
+          failure = `仓库目录不存在：${repositoryRoot}`
+        } else {
+          try {
+            refs = parseRefs(
+              await readGit(repositoryRoot, ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads', 'refs/remotes']),
+            )
+          } catch (error) {
+            failure = String(error?.message ?? error)
+          }
+        }
+        for (const card of cards) {
+          mergeProbeAt.set(card.id, { at: Date.now(), error: failure })
+          if (failure) continue
+          const next = await probeCardMerge(repositoryRoot, card, refs)
+          if (!next) continue
+          if (sameMerge(card.worktree.merge || null, next)) continue
+          card.worktree.merge = next
+          changedAny = true
+        }
+      }
+      // 卡片删了就把探测状态一起收掉，别让内存表一直长
+      for (const id of mergeProbeAt.keys()) {
+        if (!store.cards[id]) mergeProbeAt.delete(id)
+      }
+      // 观测结果变了才推：客户端收到 rev 自己去读 /board
+      if (changedAny) changed('merge-state')
+    } finally {
+      mergeRunning = false
+      if (mergeAgain) {
+        mergeAgain = false
+        scheduleMergeProbe(200)
+      }
+    }
   }
 
   function archivedSessionIds() {
@@ -1181,6 +1457,8 @@ export function apply(ctx, config) {
         card.doneAt = failed ? null : event.time
       }
       touch(card, finishing ? 'turn-end-finishing' : 'turn-end')
+      // 这一轮刚结束：卡片进「待审核 / 已完成」，正好是需要知道「分支合没合并」的时刻
+      forceMergeProbe(card)
       return
     }
     // 助手问了一句：这次 tool call 会挂起等回答，答案作为它的结果回来。
@@ -1257,7 +1535,9 @@ export function apply(ctx, config) {
       ok: true,
       rev,
       serverNow: Date.now(),
-      cards: Object.values(store.cards).sort((a, b) => a.createdAt - b.createdAt).map(viewOf),
+      cards: Object.values(store.cards)
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .map((card) => mergeViewOf(viewOf(card))),
       workspaces,
       defaultWorkspaceId,
       settings: { completion: { ...userSettings.completion }, worktree: { ...userSettings.worktree } },
@@ -1347,6 +1627,9 @@ export function apply(ctx, config) {
 
     if (req.method === 'GET' && path === `${PREFIX}/board`) {
       reconcile()
+      // 合并状态是文件系统里的事实，不是会话事件：读看板时顺手排一次只读探测，
+      // 结果变了会推 rev，客户端自己再读一遍。探测不挡这次响应。
+      scheduleMergeProbe()
       sendJson(res, 200, boardPayload())
       return true
     }
@@ -1362,8 +1645,10 @@ export function apply(ctx, config) {
       reconcile()
       const card = cardBySession(sessionId)
       // completionMode 只给会话标题栏判断 tooltip 用；看板卡片自己从 settings 里读
-      const view = card ? { ...viewOf(card), completionMode: userSettings.completion.mode } : null
-      sendJson(res, 200, { ok: true, card: view })
+      scheduleMergeProbe()
+      const view = card ? mergeViewOf({ ...viewOf(card), completionMode: userSettings.completion.mode }) : null
+      // mergeState 跟着卡片一起回：标题栏点完成前要不要提醒，由这个开关决定
+      sendJson(res, 200, { ok: true, card: view, mergeState: userSettings.worktree.mergeState })
       return true
     }
 
@@ -1416,6 +1701,7 @@ export function apply(ctx, config) {
       store.settings = next
       broadcast('settings')
       saveNow()
+      if (next.worktree.mergeState) scheduleMergeProbe()
       sendJson(res, 200, boardPayload())
       return true
     }
@@ -1439,7 +1725,7 @@ export function apply(ctx, config) {
       } else if (action === 'undone') card = markUndone(body)
       else throw httpError(400, `未知操作：${action || '(空)'}`)
       if (card) saveNow()
-      const payload = { ...boardPayload(), card: card ? viewOf(card) : null }
+      const payload = { ...boardPayload(), card: card ? mergeViewOf(viewOf(card)) : null }
       if (completionResult) {
         payload.completionResult = completionResult
         if (completionWarning) payload.completionWarning = completionWarning
@@ -1504,10 +1790,15 @@ export function apply(ctx, config) {
   // 启动后对齐一次状态，长挂时每 30 秒兜底一次
   ctx.effect(() => {
     const boot = setTimeout(reconcile, 3000)
-    const timer = setInterval(reconcile, 30_000)
+    const timer = setInterval(() => {
+      reconcile()
+      // 看板一直开着的时候，合并状态也要自己刷新（仓库级 60 秒节流兜着）
+      scheduleMergeProbe()
+    }, 30_000)
     return () => {
       clearTimeout(boot)
       clearInterval(timer)
+      if (mergeTimer) clearTimeout(mergeTimer)
       for (const client of sseClients) {
         stopBeat(client)
         try {

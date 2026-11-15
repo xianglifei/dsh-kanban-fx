@@ -73,9 +73,10 @@ worktrees itself: it calls DSH's own worktree service.
 
 On the card's first run the plugin creates a branch `fx-<number>-<title-slug>` and a checkout under
 `<repo>/.agents/worktrees/`, switches the session directory there, and then sends the card content. The source
-checkout is untouched; uncommitted changes are not copied. The card shows a `⎇ branch` chip, “preparing
-worktree” while it is being created, and returns to To do with the reason if creation fails (a retry uses a new
-branch name). A worktree is only created before the first message is delivered; a card that already ran in the
+checkout is untouched; uncommitted changes are not copied. The card shows a branch chip (branch icon + branch
+name), “preparing worktree” while it is being created, and returns to To do with the reason if creation fails (a
+retry uses a new branch name). Once a card is done, the same chip also reports whether that branch was merged
+(see the upgrade note below). A worktree is only created before the first message is delivered; a card that already ran in the
 project directory is never moved into one later. Re-running an archived card re-enters the same checkout. Archiving the session lets DSH reclaim a
 clean, unreferenced checkout but keeps the branch; deleting a card never deletes a branch.
 
@@ -108,6 +109,16 @@ DSH, then refresh the page. No new stored fields: `awaiting*` lives in memory on
 an isolated worktree, so the session itself says where it works; hovering shows the branch, the checkout path and
 the reminder to merge back. `GET /card` already carries `worktree.branch` / `worktree.path`, so nothing changes on
 the Host, in the API or in `board.json` — a page refresh is enough.
+
+0.8.0 adds merge state to the Done column on both halves: the Host observes branches with read-only Git (one
+`for-each-ref` per repository at most every 60 seconds, `--contains` plus `rev-list --count` per card, no fetch, no
+writes, 3-second timeout) and snapshots the result in `card.worktree.merge`; the client renders unmerged / merged /
+merged-and-deleted / no-commits / unmerged-and-deleted on folded Done rows, counts unmerged branches in the column
+header, and asks before marking an unmerged card done. A new Experimental setting turns the probing off (cards then
+show only the branch name). `GET /board` cards gain `worktree.merge` / `worktree.probe`, `GET /card` gains
+`mergeState`, and `POST /settings` accepts `worktree.mergeState` alongside `offer`. Reload the plugin or restart
+DSH, then refresh; `board.json` only gains an optional field and storage stays at version 2. Squash and rebase
+merges cannot be detected, so the copy says “not detected” rather than “not merged”. 
 
 ## Reference
 

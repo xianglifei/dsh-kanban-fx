@@ -201,7 +201,8 @@ window.__ModuleLoader__.load({
       if (!response.ok || !body || body.ok !== true) {
         throw new Error((body && body.error) || t(`状态读取失败（${response.status}）`, `Could not read the card (${response.status})`))
       }
-      return body.card || null
+      // mergeState 是设置开关：关了就不该在标题栏里拿旧结论弹提醒
+      return { card: body.card || null, mergeState: body.mergeState !== false }
     }
 
     // ---------------------------------------------------------------- styles
@@ -318,6 +319,25 @@ window.__ModuleLoader__.load({
 .fxk-btn-primary { background: var(--fxk-cta); border-color: var(--fxk-cta); color: var(--fxk-cta-ink); font-weight: 560; }
 .fxk-btn-primary:hover { background: var(--fxk-cta-hover); border-color: var(--fxk-cta-hover); color: var(--fxk-cta-ink); }
 .fxk-btn-primary:active { background: color-mix(in srgb, var(--fxk-cta) 72%, var(--fxk-cta-ink)); }
+/* 点完成时的确认：比编辑抽屉轻，居中一张小卡 */
+.fxk-overlay[data-align="center"] { align-items: center; justify-content: center; padding: 24px; }
+.fxk-confirm {
+  width: min(440px, 100%);
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 18px;
+  border: 1px solid var(--fxk-border); border-radius: 14px;
+  background: var(--fxk-card); box-shadow: var(--fxk-shadow);
+  animation: fxk-pop 140ms ease-out;
+}
+@keyframes fxk-pop { from { transform: translateY(6px); opacity: .7; } to { transform: none; opacity: 1; } }
+.fxk-confirm-title { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--fxk-text); }
+.fxk-confirm-text { font-size: 12.5px; line-height: 20px; color: var(--fxk-text-2); }
+.fxk-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.fxk-btn[data-tone="warn"] {
+  border-color: color-mix(in srgb, var(--fxk-warn) 40%, var(--fxk-border));
+  color: color-mix(in srgb, var(--fxk-warn) 45%, var(--fxk-text));
+}
+.fxk-btn[data-tone="warn"]:hover { background: color-mix(in srgb, var(--fxk-warn) 12%, transparent); }
 .fxk-btn-danger { color: var(--fxk-err); }
 .fxk-btn-danger:hover { background: color-mix(in srgb, var(--fxk-err) 10%, transparent); }
 .fxk-btn-icon { width: 30px; padding: 0; }
@@ -407,6 +427,19 @@ window.__ModuleLoader__.load({
 @container (max-width: 210px) {
   .fxk-col-await { display: none; }
 }
+/* 已完成列头：还有几张卡的分支没合并。和「1 张等你回答」同一套做法 */
+.fxk-col-merge {
+  margin-left: auto; height: 20px; padding: 0 7px; border-radius: 999px;
+  display: inline-flex; align-items: center;
+  background: color-mix(in srgb, var(--fxk-warn) 14%, transparent);
+  color: color-mix(in srgb, var(--fxk-warn) 42%, var(--fxk-text));
+  font-size: 11px; line-height: 1; font-weight: 560; white-space: nowrap;
+}
+.fxk-col-merge + .fxk-col-count { margin-left: 6px; }
+@container (max-width: 150px) {
+  .fxk-col-merge { display: none; }
+  .fxk-col-merge + .fxk-col-count { margin-left: auto; }
+}
 .fxk-col-body {
   flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   display: flex; flex-direction: column; gap: 10px;
@@ -453,6 +486,8 @@ window.__ModuleLoader__.load({
 .fxk-card-folded {
   flex-direction: row; align-items: center; gap: 9px;
   min-height: 32px; padding: 6px 10px;
+  /* 折叠行自己是容器：挤窄时先收状态词、再收整枚结论 */
+  container-type: inline-size;
 }
 .fxk-card-folded[data-state="done"]:hover { opacity: .96; }
 .fxk-card-title-folded {
@@ -470,6 +505,13 @@ window.__ModuleLoader__.load({
 }
 .fxk-caret-open { transform: rotate(45deg); }
 .fxk-card-folded:hover .fxk-caret { border-color: var(--fxk-text-2); }
+/* 折叠行挤窄时：先只留图标，再整枚收起（和列头那句「N 张等你回答」同样的取舍） */
+@container (max-width: 140px) {
+  .fxk-wt-folded .fxk-wt-folded-text { display: none; }
+}
+@container (max-width: 105px) {
+  .fxk-wt-folded { display: none; }
+}
 /* 展开态的折叠控件：标题行右侧的小箭头 */
 .fxk-card-title-row { display: flex; align-items: flex-start; gap: 6px; }
 .fxk-card-title-row .fxk-card-title { flex: 1 1 auto; min-width: 0; }
@@ -500,6 +542,47 @@ window.__ModuleLoader__.load({
 .fxk-chip-warn { background: color-mix(in srgb, var(--fxk-warn) 14%, transparent); color: color-mix(in srgb, var(--fxk-warn) 40%, var(--fxk-text)); }
 .fxk-chip-err { background: color-mix(in srgb, var(--fxk-err) 12%, transparent); color: color-mix(in srgb, var(--fxk-err) 55%, var(--fxk-text)); }
 .fxk-chip-branch { background: color-mix(in srgb, var(--fxk-brand) 10%, transparent); color: color-mix(in srgb, var(--fxk-brand) 55%, var(--fxk-text)); font-family: var(--fxk-mono); }
+/* 分支 chip 的结构：图标 + 分支名（可收缩）+ 合并状态（不收缩）。
+   合并状态只陈述 Git 事实，不参与卡片状态机；分支删了给名字加删除线。 */
+.fxk-chip-branch { gap: 4px; }
+.fxk-chip-branch > svg { flex: none; display: block; }
+.fxk-wt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.fxk-wt-name.is-gone { text-decoration: line-through; opacity: .72; }
+.fxk-chip-merge { max-width: 200px; }
+.fxk-chip-merge .fxk-wt-state { flex: none; }
+/* 已完成折叠行右侧的结论：只留状态词，详情在 tooltip 和展开后的 chip 里 */
+.fxk-wt-folded {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  height: 18px; padding: 0 6px; border-radius: 6px;
+  font-size: 11px; line-height: 1; white-space: nowrap;
+  font-family: var(--fxk-mono);
+  background: var(--fxk-hover); color: var(--fxk-text-2);
+}
+.fxk-wt-folded > svg { flex: none; display: block; }
+/* 同一套 tone：展开的 chip 和折叠行的结论共用 */
+.fxk-chip-merge[data-merge="unmerged"],
+.fxk-wt-folded[data-merge="unmerged"] {
+  background: color-mix(in srgb, var(--fxk-warn) 14%, transparent);
+  color: color-mix(in srgb, var(--fxk-warn) 42%, var(--fxk-text));
+}
+.fxk-chip-merge[data-merge="lost"],
+.fxk-wt-folded[data-merge="lost"] {
+  background: color-mix(in srgb, var(--fxk-err) 12%, transparent);
+  color: color-mix(in srgb, var(--fxk-err) 55%, var(--fxk-text));
+}
+.fxk-chip-merge[data-merge="merged"],
+.fxk-wt-folded[data-merge="merged"] {
+  background: color-mix(in srgb, var(--fxk-ok) 13%, transparent);
+  color: color-mix(in srgb, var(--fxk-ok) 40%, var(--fxk-text));
+}
+.fxk-chip-merge[data-merge="merged-gone"],
+.fxk-chip-merge[data-merge="empty"],
+.fxk-chip-merge[data-merge="empty-gone"],
+.fxk-chip-merge[data-merge="unknown-gone"],
+.fxk-wt-folded[data-merge="merged-gone"],
+.fxk-wt-folded[data-merge="empty"],
+.fxk-wt-folded[data-merge="empty-gone"],
+.fxk-wt-folded[data-merge="unknown-gone"] { background: var(--fxk-hover); color: var(--fxk-text-3); }
 /* 脚部自己是一层容器：列多窄就查多窄，收起 / 缩短只看这一行还剩多少位置，
    和整个面板的宽度无关（单列窄屏时列其实是整屏宽）。
    文字块一律不折行：提示、计时、按钮谁也不许被压成两行；一行放不下就整组换到下一行（按钮靠右），
@@ -1167,6 +1250,11 @@ window.__ModuleLoader__.load({
 .fxk-hd-btn[data-tone="error"]:hover { background: color-mix(in srgb, var(--fxk-hd-err) 10%, transparent); }
 .fxk-hd-btn[data-tone="board"] { border-color: var(--fxk-hd-border); color: var(--fxk-hd-text-2); }
 .fxk-hd-btn[data-tone="board"]:hover { background: var(--fxk-hd-hover); color: var(--fxk-hd-text); }
+.fxk-hd-btn[data-tone="warn"] {
+  border-color: color-mix(in srgb, var(--fxk-hd-review) 45%, var(--fxk-hd-border));
+  color: color-mix(in srgb, var(--fxk-hd-review) 65%, var(--fxk-hd-text));
+}
+.fxk-hd-btn[data-tone="warn"]:hover { background: color-mix(in srgb, var(--fxk-hd-review) 12%, transparent); }
 
 /* 窄标题栏：状态只留圆点。文字不 display:none，而是收成 1px 的屏读文本，
    这样读屏仍然能读到「进行中 / 待审核 / 已完成」，按钮优先保留。
@@ -1241,9 +1329,10 @@ window.__ModuleLoader__.load({
           viewBox: '0 0 24 24',
           fill: 'none',
           stroke: 'currentColor',
-          'stroke-width': 2.6,
-          'stroke-linecap': 'round',
-          'stroke-linejoin': 'round',
+          // React 只认 camelCase 的 SVG 属性：写成 stroke-width 会被忽略，线会细成 1px
+          strokeWidth: 2.6,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
           'aria-hidden': true,
         },
         h('line', { x1: 6, y1: 3.2, x2: 6, y2: 16 }),
@@ -1492,10 +1581,97 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 卡片上的工作树标识：成功时是分支 chip，失败时是一条警告。
-     * 走 DSH 的工作树服务，分支名与卡片编号（fx-N）对得上。
+     * 合并状态的颜色 / 文案。状态只陈述观测到的 Git 事实，不参与卡片状态机：
+     * 卡片状态仍然是列和圆点，chip 回到「元数据」的位置。
      */
-    function worktreeChipOf(card) {
+    const MERGE_LABELS = {
+      unmerged: { zh: '未合并', en: 'Unmerged' },
+      lost: { zh: '未合并，已删', en: 'Unmerged, deleted' },
+      merged: { zh: '已合并', en: 'Merged' },
+      'merged-gone': { zh: '已合并，已删', en: 'Merged, deleted' },
+      empty: { zh: '无改动', en: 'No commits' },
+      'empty-gone': { zh: '无改动，已删', en: 'No commits, deleted' },
+      'unknown-gone': { zh: '已删除，待确认', en: 'Deleted, unknown' },
+    }
+
+    /** 持久化的 merge → 展示用的 tone；没有可说的状态就返回 null（退回普通分支 chip）。 */
+    function mergeToneOf(merge) {
+      if (!merge || typeof merge !== 'object') return null
+      const gone = merge.gone === true
+      if (merge.state === 'unmerged') return gone ? 'lost' : 'unmerged'
+      if (merge.state === 'merged') return gone ? 'merged-gone' : 'merged'
+      if (merge.state === 'empty') return gone ? 'empty-gone' : 'empty'
+      if (merge.state === 'unknown' && gone) return 'unknown-gone'
+      return null
+    }
+
+    /** 一句话说清「为什么拦你一下」：用在点完成的确认里。 */
+    function mergeSummaryOf(card) {
+      const merge = card.worktree.merge
+      const branch = card.worktree.branch || t('工作树', 'Worktree')
+      const ahead = Number.isFinite(merge.ahead) && merge.ahead > 0 ? merge.ahead : null
+      if (ahead) {
+        return t(
+          `分支 ${branch} 上有 ${ahead} 个提交没被任何本地 / 远端分支包含。`,
+          `Branch ${branch} has ${ahead} commit(s) not contained by any local or remote branch.`,
+        )
+      }
+      return t(
+        `分支 ${branch} 的提交没被任何本地 / 远端分支包含。`,
+        `Branch ${branch} has commits not contained by any local or remote branch.`,
+      )
+    }
+
+    /** chip / 折叠行的 tooltip：分支、合并到哪、有几个提交、什么时候看的、下一步做什么。 */
+    function mergeTitleOf(card, merge) {
+      const worktree = card.worktree
+      const branch = worktree.branch || t('工作树', 'Worktree')
+      const lines = [`${t('分支', 'Branch')}：${branch}`]
+      const ahead = Number.isFinite(merge.ahead) && merge.ahead > 0 ? merge.ahead : null
+      if (merge.state === 'unmerged' && merge.gone) {
+        lines.push(
+          ahead
+            ? t(`分支已删除；最后一次看到它时有 ${ahead} 个提交没被别的分支包含（${formatClock(merge.observedAt)}）。`, `The branch is gone; it last had ${ahead} commit(s) not contained by any other branch (${formatClock(merge.observedAt)}).`)
+            : t('分支已删除，最后一次看到它时还没合并。', 'The branch is gone and was last seen unmerged.'),
+        )
+        lines.push(t('改动可能丢了：在 git reflog、Forge 或 PR 里找找。', 'The changes may be lost — check git reflog, Forge or the PR.'))
+      } else if (merge.state === 'unmerged') {
+        lines.push(
+          ahead
+            ? t(`有 ${ahead} 个提交没被任何本地 / 远端分支包含。`, `${ahead} commit(s) are not contained by any local or remote branch.`)
+            : t('这个分支的提交没被任何本地 / 远端分支包含。', 'This branch’s commits are not contained by any local or remote branch.'),
+        )
+        lines.push(t(`合并：在项目目录 git merge ${branch}`, `Merge it: git merge ${branch} in the project root`))
+        lines.push(t('提示：squash / rebase 合并可能认不出来。', 'Note: squash or rebase merges may not be detected.'))
+      } else if (merge.state === 'merged') {
+        lines.push(merge.into ? t(`已并入 ${merge.into}。`, `Already merged into ${merge.into}.`) : t('已经被别的分支包含。', 'Already contained by another branch.'))
+        if (merge.gone) lines.push(t('分支已经删除。', 'The branch has been deleted.'))
+        else lines.push(t(`可以删掉分支了：git branch -d ${branch}`, `You can delete the branch now: git branch -d ${branch}`))
+      } else if (merge.state === 'empty') {
+        if (merge.gone) {
+          lines.push(t('分支已删除；它本来就没有提交，什么都没丢。', 'The branch is gone; it had no commits, so nothing was lost.'))
+        } else {
+          lines.push(t('这个分支上没有提交（tip 就是建树时的那个提交）。', 'No commits on this branch — its tip is the commit it was created from.'))
+          lines.push(t(`删掉不会丢东西：git branch -d ${branch}`, `Deleting it loses nothing: git branch -d ${branch}`))
+        }
+      } else {
+        lines.push(t('分支已经不在了，看板也没有它合并与否的记录。', 'The branch is gone and the board has no record of a merge.'))
+        lines.push(t('分支名不在提交里，删掉之后无从倒推。', 'A branch name is not stored in commits, so it cannot be recovered after deletion.'))
+      }
+      if (merge.gone) {
+        lines.push(t('检出归 DSH 管：归档会话时会清掉检出。', 'The checkout is DSH’s: archiving the conversation removes it.'))
+      }
+      if (merge.observedAt) lines.push(t(`记录于 ${formatClock(merge.observedAt)}`, `recorded ${formatClock(merge.observedAt)}`))
+      const probe = worktree.probe
+      if (probe && probe.error) lines.push(t(`暂时检测不到（${probe.error}），显示的是上次结论。`, `Cannot check right now (${probe.error}) — showing the last known state.`))
+      return lines.join('\n')
+    }
+
+    /**
+     * 卡片 / 列表里的工作树 chip：分支图标 + 分支名，有合并观测时补一个状态词。
+     * 分支名可以省略，状态词不行（窄）——所以只有名字那一段是可收缩的。
+     */
+    function worktreeChipOf(card, mergeOn) {
       const worktree = card && card.worktree ? card.worktree : null
       if (!worktree) return null
       if (!worktree.path) {
@@ -1503,13 +1679,33 @@ window.__ModuleLoader__.load({
           ? h('span', { className: 'fxk-chip fxk-chip-err', title: worktree.error }, t('工作树失败', 'Worktree failed'))
           : null
       }
+      const name = worktree.branch || t('工作树', 'Worktree')
+      // 只在「已完成」里给结论：待审核的「未合并」是常态，标成琥珀只会让人习惯性忽略
+      const tone = mergeOn && card.status === 'done' ? mergeToneOf(worktree.merge) : null
+      if (!tone) {
+        const title = [worktree.branch, worktree.path].filter(Boolean).join('\n')
+        const probe = worktree.probe
+        return h(
+          'span',
+          {
+            className: 'fxk-chip fxk-chip-branch',
+            title: probe && probe.error ? `${title}\n${t('暂时检测不到合并状态。', 'Merge state is unavailable right now.')}` : title,
+          },
+          h(IconBranch, { size: 10 }),
+          h('span', { className: 'fxk-wt-name' }, name),
+        )
+      }
+      const label = MERGE_LABELS[tone]
       return h(
         'span',
         {
-          className: 'fxk-chip fxk-chip-branch',
-          title: [worktree.branch, worktree.path].filter(Boolean).join('\n'),
+          className: 'fxk-chip fxk-chip-branch fxk-chip-merge',
+          'data-merge': tone,
+          title: mergeTitleOf(card, worktree.merge),
         },
-        `⎇ ${worktree.branch || t('工作树', 'Worktree')}`,
+        h(IconBranch, { size: 10 }),
+        h('span', { className: `fxk-wt-name${worktree.merge.gone ? ' is-gone' : ''}` }, name),
+        h('span', { className: 'fxk-wt-state' }, `· ${t(label.zh, label.en)}`),
       )
     }
 
@@ -1733,18 +1929,34 @@ window.__ModuleLoader__.load({
       // 工作树：服务在不在由 DSH 的插件决定，看板只能「提供入口」或「不提供」
       const worktreeAvailable = Boolean(props.capabilities && props.capabilities.worktrees)
       const worktreeOffer = Boolean(settings && settings.worktree && settings.worktree.offer)
+      // 没写过这个字段的老设置按「开」算，和 Host 的默认值一致
+      const mergeStateOn = !(settings && settings.worktree && settings.worktree.mergeState === false)
       const [worktreeSaving, setWorktreeSaving] = useState(false)
       const [worktreeFailure, setWorktreeFailure] = useState('')
+      const [mergeSaving, setMergeSaving] = useState(false)
+      const [mergeFailure, setMergeFailure] = useState('')
 
       const toggleWorktree = async (next) => {
         setWorktreeSaving(true)
         setWorktreeFailure('')
         try {
-          await props.onSaveWorktree(next)
+          await props.onSaveWorktree({ offer: next })
         } catch (saveFailure) {
           setWorktreeFailure(String(saveFailure?.message ?? saveFailure))
         } finally {
           setWorktreeSaving(false)
+        }
+      }
+
+      const toggleMergeState = async (next) => {
+        setMergeSaving(true)
+        setMergeFailure('')
+        try {
+          await props.onSaveWorktree({ mergeState: next })
+        } catch (saveFailure) {
+          setMergeFailure(String(saveFailure?.message ?? saveFailure))
+        } finally {
+          setMergeSaving(false)
         }
       }
 
@@ -1997,6 +2209,45 @@ window.__ModuleLoader__.load({
                             ),
                           ),
                         ),
+                    h(
+                      'label',
+                      {
+                        className: 'fxk-check',
+                        'data-checked': String(mergeStateOn),
+                        'data-disabled': String(disabled),
+                        title: t(
+                          '用只读 Git 查分支有没有合并，不 fetch、不改仓库',
+                          'Checks merges with read-only Git — no fetch, no repository changes',
+                        ),
+                      },
+                      h('input', {
+                        type: 'checkbox',
+                        checked: mergeStateOn,
+                        disabled: disabled || mergeSaving,
+                        'aria-describedby': 'fxk-merge-state-desc',
+                        onChange: (event) => void toggleMergeState(event.target.checked),
+                      }),
+                      h(
+                        'span',
+                        { className: 'fxk-check-text' },
+                        h(
+                          'span',
+                          { className: 'fxk-check-title' },
+                          mergeSaving
+                            ? t('正在保存…', 'Saving…')
+                            : t('在已完成列标出分支合并状态', 'Show branch merge state on done cards'),
+                        ),
+                        h(
+                          'span',
+                          { id: 'fxk-merge-state-desc', className: 'fxk-check-desc' },
+                          t(
+                            '每 60 秒用只读 Git 查一次：未合并 / 已合并 / 已合并，已删 / 无改动，折叠行右侧就能看到。squash、rebase 合并可能认不出来。',
+                            'Checks once a minute with read-only Git: unmerged / merged / merged-deleted / no commits, shown on the folded done rows. Squash and rebase merges may not be detected.',
+                          ),
+                        ),
+                      ),
+                    ),
+                    mergeFailure ? h('p', { className: 'fxk-settings-error', role: 'alert' }, mergeFailure) : null,
                     worktreeFailure
                       ? h('p', { className: 'fxk-settings-error', role: 'alert' }, worktreeFailure)
                       : null,
@@ -2004,8 +2255,8 @@ window.__ModuleLoader__.load({
                       'p',
                       { className: 'fxk-settings-note' },
                       t(
-                        '这个开关只决定卡片上要不要出现选项；某张卡片要不要隔离开，永远由建卡时的那个人决定。',
-                        'This switch only controls whether the option appears on cards; whether a given card needs isolation is always the card author’s call.',
+                        '第一个开关只决定卡片上要不要出现「独立工作树」选项，某张卡片要不要隔离永远由建卡的人决定；第二个只读 Git，不改仓库、不 fetch。',
+                        'The first switch only controls whether the worktree option appears on cards — whether a card needs isolation is always the card author’s call. The second only reads Git: no fetch, no repository changes.',
                       ),
                     ),
                   ),
@@ -2159,6 +2410,8 @@ window.__ModuleLoader__.load({
       const [settingsOpen, setSettingsOpen] = useState(false)
       // 「已完成」列默认折叠成标题行；只有用户点开的那几张会展开，状态只活在这个面板里。
       const [expandedDone, setExpandedDone] = useState(() => new Set())
+      // 点完成时的「这条分支还没合并」确认：{ card }
+      const [doneConfirm, setDoneConfirm] = useState(null)
       const [now, setNow] = useState(() => Date.now())
       const skewRef = useRef(0)
 
@@ -2228,11 +2481,15 @@ window.__ModuleLoader__.load({
 
       /** 保存「实验功能」里的工作树入口开关；只发这一段，服务端按当前值合并。 */
       const saveWorktree = useCallback(
-        async (offer) => {
+        async (patch) => {
+          // 只发这一段，服务端按当前值合并；开关之间互不覆盖
+          const worktree = {}
+          if (patch && typeof patch.offer === 'boolean') worktree.offer = patch.offer
+          if (patch && typeof patch.mergeState === 'boolean') worktree.mergeState = patch.mergeState
           const response = await fetch(`${API}/settings`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ settings: { worktree: { offer: Boolean(offer) } } }),
+            body: JSON.stringify({ settings: { worktree } }),
           })
           const payload = await response.json().catch(() => null)
           if (!response.ok || !payload || payload.ok !== true) {
@@ -2308,6 +2565,29 @@ window.__ModuleLoader__.load({
       const workspaces = board ? board.workspaces : []
       // 「完成」按钮的 tooltip 跟着设置走：prompt 模式下它先发提示词，不是立刻完成
       const completionMode = board && board.settings && board.settings.completion ? board.settings.completion.mode : 'none'
+      // 合并状态开关：关掉后卡片只显示分支名（Host 也不再探测）
+      const mergeStateOn = Boolean(
+        board && board.settings && board.settings.worktree && board.settings.worktree.mergeState !== false,
+      )
+
+      /** 已完成折叠行右侧的结论：没有可说的状态就不出现，别让 Done 列挂满灰 chip。 */
+      const foldedMergeOf = (card) => {
+        if (!mergeStateOn) return null
+        const merge = card.worktree ? card.worktree.merge : null
+        const tone = mergeToneOf(merge)
+        if (!tone) return null
+        const label = MERGE_LABELS[tone]
+        return h(
+          'span',
+          {
+            className: 'fxk-wt-folded',
+            'data-merge': tone,
+            title: mergeTitleOf(card, merge),
+          },
+          h(IconBranch, { size: 10 }),
+          h('span', { className: 'fxk-wt-folded-text' }, t(label.zh, label.en)),
+        )
+      }
       const workspaceIds = workspaces.map((workspace) => workspace.id)
       const orphanCards = cards.filter((card) => !card.workspaceId)
       const missingCards = cards.filter((card) => card.workspaceId && !workspaceIds.includes(card.workspaceId))
@@ -2456,6 +2736,15 @@ window.__ModuleLoader__.load({
         return () => clearTimeout(timer)
       }, [toast])
 
+      useEffect(() => {
+        if (!doneConfirm) return undefined
+        const onKey = (event) => {
+          if (event.key === 'Escape') setDoneConfirm(null)
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+      }, [doneConfirm])
+
       const runCard = useCallback(
         async (card) => {
           setBusy(`run:${card.id}`)
@@ -2471,7 +2760,8 @@ window.__ModuleLoader__.load({
         [post, notify],
       )
 
-      const markDone = useCallback(
+      /** 真的去标完成；点完成前的确认也走这里。 */
+      const performDone = useCallback(
         async (card) => {
           setBusy(`done:${card.id}`)
           try {
@@ -2501,6 +2791,22 @@ window.__ModuleLoader__.load({
           }
         },
         [post, notify],
+      )
+
+      /**
+       * 点「完成」：分支上还有没合并的提交时先问一句。
+       * 看完板的人很容易把「标记完成」当成「已经合进去了」，其实 Done 列只是记录事实。
+       */
+      const markDone = useCallback(
+        (card) => {
+          const tone = mergeStateOn ? mergeToneOf(card.worktree && card.worktree.merge) : null
+          if (tone === 'unmerged') {
+            setDoneConfirm({ card })
+            return
+          }
+          void performDone(card)
+        },
+        [mergeStateOn, performDone],
       )
 
       const markUndone = useCallback(
@@ -2639,6 +2945,7 @@ window.__ModuleLoader__.load({
             },
             h('span', { className: 'fxk-caret', 'aria-hidden': 'true' }),
             h('span', { className: 'fxk-card-title fxk-card-title-folded' }, card.title),
+            foldedMergeOf(card),
           )
         }
 
@@ -2695,7 +3002,7 @@ window.__ModuleLoader__.load({
             { className: 'fxk-card-meta' },
             title ? h('span', { className: 'fxk-chip', title }, title) : null,
             card.workspaceId && !title ? h('span', { className: 'fxk-chip fxk-chip-warn' }, t('工作区不可用', 'Workspace missing')) : null,
-            worktreeChipOf(card),
+            worktreeChipOf(card, mergeStateOn),
             attachmentCount ? h('span', { className: 'fxk-chip', title: t('附件', 'Attachments') }, `📎 ${attachmentCount}`) : null,
             card.sessionArchived ? h('span', { className: 'fxk-chip fxk-chip-warn', title: t('会话已归档', 'Conversation archived') }, t('会话已归档', 'Archived')) : null,
             card.error ? h('span', { className: 'fxk-chip fxk-chip-err', title: card.error }, t('有报错', 'Error')) : null,
@@ -2872,6 +3179,12 @@ window.__ModuleLoader__.load({
         const isTodo = column.id === 'todo'
         // 进行中列头补一句「N 张等你回答」：卡片已经排到最前，这里再给一个一眼能看到的数
         const awaitingCount = column.id === 'running' ? items.filter((card) => card.awaiting).length : 0
+        // 已完成列头补一句「N 未合并」：默认折叠的列表里，这是唯一一眼能看到的线索
+        const mergeTones = column.id === 'done' && mergeStateOn
+          ? items.map((card) => mergeToneOf(card.worktree && card.worktree.merge))
+          : []
+        const mergePending = mergeTones.filter((tone) => tone === 'unmerged' || tone === 'lost').length
+        const mergeLost = mergeTones.filter((tone) => tone === 'lost').length
         return h(
           'section',
           { key: column.id, className: 'fxk-col', 'data-state': column.id, 'aria-label': isZh() ? column.zh : column.en },
@@ -2880,6 +3193,21 @@ window.__ModuleLoader__.load({
             { className: 'fxk-col-head' },
             h('span', { className: 'fxk-col-dot' }),
             h('span', { className: 'fxk-col-name' }, isZh() ? column.zh : column.en),
+            mergePending > 0
+              ? h(
+                  'span',
+                  {
+                    className: 'fxk-col-merge',
+                    title: mergeLost > 0
+                      ? t(
+                          `${mergePending} 张的分支还没合并，其中 ${mergeLost} 张的分支已删除`,
+                          `${mergePending} branch(es) not merged yet — ${mergeLost} of them already deleted`,
+                        )
+                      : t(`${mergePending} 张的分支还没合并（没检测到合并）`, `${mergePending} branch(es) not merged yet`),
+                  },
+                  t(`${mergePending} 未合并`, `${mergePending} unmerged`),
+                )
+              : null,
             h(
               'span',
               {
@@ -3096,7 +3424,7 @@ window.__ModuleLoader__.load({
               attachmentCount
                 ? h('span', { className: 'fxk-att', title: t('附件', 'Attachments') }, `📎 ${attachmentCount}`)
                 : null,
-              worktreeChipOf(card),
+              worktreeChipOf(card, mergeStateOn),
               card.error ? h('span', { className: 'fxk-chip fxk-chip-err', title: card.error }, t('有报错', 'Error')) : null,
               card.sessionArchived
                 ? h('span', { className: 'fxk-chip fxk-chip-warn', title: t('会话已归档，可点右侧重新执行', 'Conversation archived — run again on the right') }, t('已归档', 'Archived'))
@@ -3183,6 +3511,62 @@ window.__ModuleLoader__.load({
           ),
         )
       }
+
+      /** 点完成前的确认：分支上还有没合并的提交。 */
+      const doneConfirmNode = doneConfirm
+        ? h(
+            'div',
+            {
+              className: 'fxk-overlay',
+              'data-align': 'center',
+              onClick: (event) => {
+                if (event.target === event.currentTarget) setDoneConfirm(null)
+              },
+            },
+            h(
+              'div',
+              {
+                className: 'fxk-confirm',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-label': t('这个分支还没合并', 'This branch is not merged yet'),
+              },
+              h('div', { className: 'fxk-confirm-title' }, t('这个分支还没合并', 'This branch is not merged yet')),
+              h('div', { className: 'fxk-confirm-text' }, mergeSummaryOf(doneConfirm.card)),
+              h(
+                'div',
+                { className: 'fxk-confirm-text' },
+                t(
+                  '现在标记完成，看板只记下「仍未合并」；合并后 Done 列会自己变绿。',
+                  'Marking it done now just records “still unmerged”; the Done column turns green once you merge.',
+                ),
+              ),
+              h(
+                'div',
+                { className: 'fxk-confirm-actions' },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'fxk-btn',
+                    'data-tone': 'warn',
+                    onClick: () => {
+                      const pending = doneConfirm.card
+                      setDoneConfirm(null)
+                      void performDone(pending)
+                    },
+                  },
+                  t('仍然完成', 'Mark done anyway'),
+                ),
+                h(
+                  'button',
+                  { type: 'button', className: 'fxk-btn fxk-btn-primary', onClick: () => setDoneConfirm(null) },
+                  t('先去合并', 'Merge first'),
+                ),
+              ),
+            ),
+          )
+        : null
 
       // 看板视图 = 一个工作区。异常抽屉只在真的存在这类卡片时出现，平时完全看不到。
       const filterOptions = [
@@ -3363,6 +3747,7 @@ window.__ModuleLoader__.load({
             )
           : null,
         view === 'list' ? renderListTable() : h('div', { className: 'fxk-board' }, COLUMNS.map(renderColumn)),
+        doneConfirmNode,
         modal
           ? h(Editor, {
               key: modal.card ? modal.card.id : 'new',
@@ -4133,6 +4518,9 @@ window.__ModuleLoader__.load({
       // idle | busy | failed | board
       const [phase, setPhase] = useState('idle')
       const [failure, setFailure] = useState('')
+      // 分支上还有没合并的提交：第一次点「完成」只把按钮变成确认，第二次才真的标
+      const [confirming, setConfirming] = useState(false)
+      const [mergeStateOn, setMergeStateOn] = useState(true)
       const running = useSession((snapshot) => snapshot.running)
       const alive = useRef(true)
       const wasRunning = useRef(running)
@@ -4141,8 +4529,11 @@ window.__ModuleLoader__.load({
       const load = useCallback(async () => {
         try {
           const next = await fetchSessionCard(sessionId)
-          headerCardCache.set(sessionId, next)
-          if (alive.current) setCard(next)
+          headerCardCache.set(sessionId, next.card)
+          if (alive.current) {
+            setCard(next.card)
+            setMergeStateOn(next.mergeState)
+          }
         } catch (error) {
           console.error('[kanban-fx] 读取卡片状态失败：', error?.message ?? error)
         }
@@ -4181,6 +4572,13 @@ window.__ModuleLoader__.load({
         return () => window.clearInterval(timer)
       }, [running, load])
 
+      // 这一轮结束 / 失败 / 超时都要把「确认」收掉，别让按钮一直停在问句上
+      useEffect(() => {
+        if (!confirming) return undefined
+        const timer = window.setTimeout(() => setConfirming(false), 6000)
+        return () => window.clearTimeout(timer)
+      }, [confirming])
+
       if (card === undefined || card === null || card.sessionArchived) return null
 
       const cardRunning = Boolean(card && card.status === 'running')
@@ -4194,6 +4592,15 @@ window.__ModuleLoader__.load({
           ? 'done'
           : 'review'
       const meta = HEADER_STATE[state]
+      // 分支上还有没合并的提交：点「完成」时先要一次确认（标题栏没有弹窗宿主，就地把按钮变成确认）
+      const needsMergeWarning = Boolean(
+        mergeStateOn &&
+          card &&
+          card.worktree &&
+          card.worktree.merge &&
+          card.worktree.merge.state === 'unmerged' &&
+          card.worktree.merge.gone !== true,
+      )
 
       const openBoard = (workspaceId, outcome = 'done') => {
         const layout = pluginCtx?.get('layout')
@@ -4214,6 +4621,11 @@ window.__ModuleLoader__.load({
 
       const complete = async () => {
         if (phase === 'busy') return
+        if (needsMergeWarning && !confirming) {
+          setConfirming(true)
+          return
+        }
+        setConfirming(false)
         setPhase('busy')
         setFailure('')
         let body = null
@@ -4291,16 +4703,27 @@ window.__ModuleLoader__.load({
                 {
                   type: 'button',
                   className: 'fxk-hd-btn',
-                  'data-tone': phase === 'failed' ? 'error' : undefined,
+                  'data-tone': phase === 'failed' ? 'error' : confirming ? 'warn' : undefined,
                   disabled: phase === 'busy',
-                  title: phase === 'failed' ? failure || t('标记失败，点击重试', 'Could not mark it done — click to retry') : doneHint,
+                  title: phase === 'failed'
+                    ? failure || t('标记失败，点击重试', 'Could not mark it done — click to retry')
+                    : confirming
+                      ? t(
+                          `分支 ${card.worktree.branch || ''} 还没合并；再点一次就标记完成，或先去合并`,
+                          `Branch ${card.worktree.branch || ''} is not merged yet — click again to mark it done anyway`,
+                        )
+                      : needsMergeWarning
+                        ? t(`${doneHint}（分支还没合并，会先确认一次）`, `${doneHint} (the branch is unmerged — one confirmation first)`)
+                        : doneHint,
                   onClick: () => void complete(),
                 },
                 phase === 'busy'
                   ? t('标记中…', 'Marking…')
                   : phase === 'failed'
                     ? t('标记失败', 'Retry')
-                    : t('✓ 完成', '✓ Mark done'),
+                    : confirming
+                      ? t('未合并，仍要完成？', 'Unmerged — complete anyway?')
+                      : t('✓ 完成', '✓ Mark done'),
               )
             : null
 
