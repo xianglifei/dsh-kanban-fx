@@ -1087,6 +1087,9 @@ window.__ModuleLoader__.load({
   --fxk-hd-review: var(--dsw-alias-state-warn-primary, #f59e0b);
   --fxk-hd-done: var(--dsw-alias-state-success-primary, #22c55e);
   --fxk-hd-err: var(--dsw-alias-state-error-primary, #ec1313);
+  /* 元数据底色：和标题栏里的预设标签（Standard）同一个 token，不让它看起来像按钮 */
+  --fxk-hd-fill: var(--dsw-alias-fill-tsp-secondary, rgba(38, 49, 72, .06));
+  --fxk-hd-mono: var(--dsw-font-mono, ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace);
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1105,6 +1108,42 @@ window.__ModuleLoader__.load({
 .fxk-hd-state[data-state="awaiting"] .fxk-hd-dot { background: var(--fxk-hd-review); }
 .fxk-hd-state[data-state="review"] .fxk-hd-dot { background: var(--fxk-hd-review); }
 .fxk-hd-state[data-state="done"] .fxk-hd-dot { background: var(--fxk-hd-done); }
+/* 工作树位置：卡片勾了独立 worktree，会话就在 .agents/worktrees/ 的检出里跑，
+   项目目录看不到这些改动。这枚分支标常驻标题栏：宽标题栏写分支名，窄标题栏只留图标；
+   分支 / 目录 / 合并提醒都放进 tooltip。
+   它不抢「圆点是状态、✓ 是动作」的约定：只用预设标签那种元数据底色，不加圆点、不描边，
+   唯一的实心控件仍然是「✓ 完成」。 */
+.fxk-hd-wt {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 168px; height: 22px; padding: 0 7px;
+  /* 常态是透明边框：勾了还没建时换成虚线，宽度不跳 */
+  border: 1px dashed transparent;
+  border-radius: 6px;
+  background: var(--fxk-hd-fill);
+  color: var(--fxk-hd-text-2);
+  font-size: 12px; line-height: 22px;
+  white-space: nowrap; overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+.fxk-hd-wt > svg { flex: none; display: block; }
+.fxk-hd-wt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--fxk-hd-mono); }
+/* 勾了但还没建：虚线、降一档文字色，别让人把它当成真的分支名 */
+.fxk-hd-wt[data-phase="preparing"] {
+  border-color: var(--fxk-hd-border);
+  background: transparent;
+  color: var(--fxk-hd-text-3);
+}
+/* 建树失败：只剩红字，不填色（不当按钮），原因在 tooltip 里 */
+.fxk-hd-wt[data-tone="error"] {
+  background: transparent;
+  color: var(--fxk-hd-err);
+}
+.fxk-hd-wt-sr {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; border: 0;
+}
 .fxk-hd-btn {
   display: inline-flex; align-items: center; gap: 4px;
   height: 22px; padding: 0 8px;
@@ -1130,7 +1169,8 @@ window.__ModuleLoader__.load({
 .fxk-hd-btn[data-tone="board"]:hover { background: var(--fxk-hd-hover); color: var(--fxk-hd-text); }
 
 /* 窄标题栏：状态只留圆点。文字不 display:none，而是收成 1px 的屏读文本，
-   这样读屏仍然能读到「进行中 / 待审核 / 已完成」，按钮优先保留。 */
+   这样读屏仍然能读到「进行中 / 待审核 / 已完成」，按钮优先保留。
+   工作树分支标同理：分支名收成屏读文本，只留图标，tooltip 照旧。 */
 @container (max-width: 620px) {
   .fxk-hd-label {
     position: absolute; width: 1px; height: 1px;
@@ -1138,6 +1178,12 @@ window.__ModuleLoader__.load({
     clip-path: inset(50%); white-space: nowrap; border: 0;
   }
   .fxk-hd-state { padding: 0; }
+  .fxk-hd-wt-name {
+    position: absolute; width: 1px; height: 1px;
+    margin: -1px; padding: 0; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap; border: 0;
+  }
+  .fxk-hd-wt { gap: 0; padding: 0 6px; }
 }
 `
 
@@ -1178,6 +1224,33 @@ window.__ModuleLoader__.load({
     /** 工作区「…」菜单里的看板图标：菜单行的图标位是 16px，侧边栏入口那颗 18px 会顶出来。 */
     function KanbanMenuIcon() {
       return h(IconKanban, { size: 16 })
+    }
+
+    /**
+     * 工作树的分支图标。
+     * 卡片脚部用 ⎇ 字形（后面跟着分支名，认得出）；标题栏窄下来只剩图标，
+     * ⎇ 在 12px 下像个小对勾，容易和旁边的「✓ 完成」混，所以这里画一颗真的分支。
+     */
+    function IconBranch(props) {
+      const size = props && Number(props.size) > 0 ? Number(props.size) : 12
+      return h(
+        'svg',
+        {
+          width: size,
+          height: size,
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          stroke: 'currentColor',
+          'stroke-width': 2.6,
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+          'aria-hidden': true,
+        },
+        h('line', { x1: 6, y1: 3.2, x2: 6, y2: 16 }),
+        h('circle', { cx: 18, cy: 6, r: 3 }),
+        h('circle', { cx: 6, cy: 18, r: 3 }),
+        h('path', { d: 'M18 9a9 9 0 0 1-9 9' }),
+      )
     }
 
     /** 列表视图图标：三条带点的行，和看板的竖条图标是一对。 */
@@ -3979,6 +4052,76 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 会话标题栏里的「工作树位置」。
+     *
+     * 勾了独立工作树的卡片，会话跑在 .agents/worktrees/ 的检出里，项目目录看不到这些改动。
+     * 标题栏不写出来，人就会以为改在自己仓库里，跑完直接归档，分支留在那儿没人合并。
+     * 所以常驻一枚分支标：宽标题栏写分支名，窄标题栏只留图标；分支 / 目录 / 合并提醒
+     * 都放进 tooltip。勾了但还没建好时是虚线的「准备工作树」。
+     */
+    function headerWorktreeOf(card, state) {
+      const worktree = card && card.worktree ? card.worktree : null
+      if (!worktree) return null
+      const branch = worktree.branch || ''
+      if (!worktree.path && !branch) {
+        // 建树失败：会话已经建出来了（这次没跑），别让她一直挂着「准备工作树」
+        if (worktree.error) {
+          return h(
+            'span',
+            {
+              className: 'fxk-hd-wt',
+              'data-tone': 'error',
+              title: [
+                t('工作树没建成，这张卡片这次没有跑起来。', 'The worktree could not be created, so this card did not run.'),
+                worktree.error,
+                t('再执行一次会重试，分支名会换一个。', 'Running it again retries with a new branch name.'),
+              ].join('\n'),
+            },
+            h(IconBranch, { size: 12 }),
+            h('span', { className: 'fxk-hd-wt-name' }, t('工作树失败', 'Worktree failed')),
+          )
+        }
+        // 只勾了、还没建：第一次执行时才建分支，如实说「在准备」，别假装已有分支
+        if (!worktree.requested) return null
+        return h(
+          'span',
+          {
+            className: 'fxk-hd-wt',
+            'data-phase': 'preparing',
+            title: t(
+              '这张卡片勾了独立工作树，第一次执行时建分支与检出；建好后这里会显示分支名和目录。',
+              'This card asked for an isolated worktree. The first run creates the branch and checkout; the name and path appear here once it exists.',
+            ),
+          },
+          h(IconBranch, { size: 12 }),
+          h('span', { className: 'fxk-hd-wt-name' }, t('准备工作树', 'Preparing worktree')),
+        )
+      }
+      const name = branch || t('工作树', 'Worktree')
+      // 这一轮结束了才最该提醒合并：跑的时候说「在哪」，跑完说「还没合并」
+      const lead =
+        state === 'review' || state === 'done'
+          ? t('这一轮已经结束，改动还在工作树分支上。', 'This run has ended; the changes are still on the worktree branch.')
+          : t('这一轮在独立工作树里跑，改动不在项目目录。', 'This run works in an isolated worktree, not in your project folder.')
+      const title = [
+        lead,
+        `${t('分支', 'Branch')}：${name}`,
+        worktree.path ? `${t('目录', 'Path')}：${worktree.path}` : null,
+        t(
+          `合并回主分支（在项目目录 git merge ${name}）；归档会话时 DSH 会删掉检出，分支保留。`,
+          `Merge it back (git merge ${name} in the project root); archiving the session removes the checkout but keeps the branch.`,
+        ),
+      ].filter(Boolean)
+      return h(
+        'span',
+        { className: 'fxk-hd-wt', title: title.join('\n') },
+        h('span', { className: 'fxk-hd-wt-sr' }, t('独立工作树，分支 ', 'isolated worktree, branch ')),
+        h(IconBranch, { size: 12 }),
+        h('span', { className: 'fxk-hd-wt-name' }, name),
+      )
+    }
+
+    /**
      * 会话标题栏里的「卡片状态 + 完成」。
      *
      * 只对看板卡片开的会话出现。状态优先用会话的实时 running：
@@ -4164,6 +4307,7 @@ window.__ModuleLoader__.load({
       return h(
         'span',
         { className: 'fxk-hd' },
+        headerWorktreeOf(card, state),
         h(
           'span',
           { className: 'fxk-hd-state', 'data-state': state, title: t(meta.hintZh, meta.hintEn) },

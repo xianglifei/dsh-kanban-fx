@@ -6,7 +6,7 @@
 点「执行」就直接在对应工作区开会话、把卡片内容投进去开跑；跑完、报错、暂停，状态都挂在卡片上，
 回看板就知道做到哪了。
 
-[![version](https://img.shields.io/badge/version-0.7.0-1f6feb?style=flat-square)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.7.1-1f6feb?style=flat-square)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-3fb950?style=flat-square)](LICENSE)
 [![DSH](https://img.shields.io/badge/DSH-%5E0.2.2--rc.1-8957e5?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
 
@@ -102,6 +102,9 @@ v1 不支持拖拽或手动改状态。
 把会话目录切过去，再投递内容；会话里会自动带上新的工作目录说明。源目录保持原样，未提交的改动**不会**带过去。
 
 - 卡片上会出现 `⎇ fx-12-…` 分支 chip；准备期间显示「准备工作树…」，失败会回到待办并保留原因，重试会换一个新分支名。
+- 会话标题栏也会常驻一枚分支标（分支图标 + 分支名）：告诉你这一轮是在**哪**跑的，而不是项目目录。
+  悬停给出分支、检出目录和「跑完在项目目录 `git merge <分支>` 合并回去；归档会删掉检出、分支保留」；
+  标题栏窄到 620px 只剩图标（悬停与读屏仍然说得出分支名）。
 - 会话归档后点「重新执行」，新会话会回到同一份检出；目录已被删掉时给明确错误，可在会话里用 Forge 的「恢复工作树」。
 - 工作树只在**第一条消息投递之前**建立；已经在项目目录跑过的卡片不会再被中途搬进新检出。
 - 归档会话时，DSH 会回收干净且没人引用的检出（**分支保留**）；删卡片不等于删分支。

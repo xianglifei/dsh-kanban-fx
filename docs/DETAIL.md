@@ -104,6 +104,11 @@ version 2.
 client renders the footer, ordering, column count, list pill and session header). Reload the plugin or restart
 DSH, then refresh the page. No new stored fields: `awaiting*` lives in memory only and storage stays at version 2.
 
+0.7.1 is client-only: the session header gains a worktree badge (branch icon + branch name) for cards that run in
+an isolated worktree, so the session itself says where it works; hovering shows the branch, the checkout path and
+the reminder to merge back. `GET /card` already carries `worktree.branch` / `worktree.path`, so nothing changes on
+the Host, in the API or in `board.json` — a page refresh is enough.
+
 ## Reference
 
 Interface details, autosave, title derivation, card numbering, storage schema, Host endpoints, and the run /
