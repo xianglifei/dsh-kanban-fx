@@ -14,6 +14,7 @@ window.__ModuleLoader__.load({
     let pluginCtx = null
 
     const API = '/kanban-fx'
+    // 兜底值：真实上限以 Host 随 /board 下发的 advanced.limits 为准（Editor 里优先用它）
     const MAX_CARD_BYTES = 24 * 1024 * 1024
     const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
     // 自动保存：停手 1.2 秒先存一次，连续打字时再每 8 秒兜底存一次
@@ -152,16 +153,18 @@ window.__ModuleLoader__.load({
       },
     ]
 
-    let zhCache = null
+    // 上次读到的答案只在 locale 服务读不出来时兜底用：语言运行中被切换要能跟着换，
+    // 不能起步时缓存一次就定死（getSnapshot 是快照读，每次调用开销很小）
+    let zhFallback = true
     function isZh() {
-      if (zhCache !== null) return zhCache
-      let value = 'zh'
       try {
         const snapshot = pluginCtx?.get('locale')?.getSnapshot?.()
-        value = String(snapshot?.locale ?? snapshot?.id ?? snapshot?.current ?? 'zh')
-      } catch {}
-      zhCache = value.toLowerCase().startsWith('zh')
-      return zhCache
+        const value = String(snapshot?.locale ?? snapshot?.id ?? snapshot?.current ?? 'zh')
+        zhFallback = value.toLowerCase().startsWith('zh')
+        return zhFallback
+      } catch {
+        return zhFallback
+      }
     }
     const t = (cn, en) => (isZh() ? cn : en)
 
@@ -173,7 +176,18 @@ window.__ModuleLoader__.load({
 
     // ------------------------------------------- session header (card status)
     // 会话 → 卡片的探测结果：命中先画、再后台刷新，切回会话时标题栏不会闪一下空。
+    // 只留最近 HEADER_CACHE_MAX 条：webview 长挂时无上限的缓存会一直涨。
+    const HEADER_CACHE_MAX = 50
     const headerCardCache = new Map()
+
+    /** 记一条探测结果（null 也是有效结论：这个会话不是看板卡片）；超出上限时丢最旧的。 */
+    function rememberHeaderCard(sessionId, card) {
+      headerCardCache.delete(sessionId)
+      headerCardCache.set(sessionId, card)
+      if (headerCardCache.size > HEADER_CACHE_MAX) {
+        headerCardCache.delete(headerCardCache.keys().next().value)
+      }
+    }
     // 从会话标题栏点「完成」跳回看板时，交接给看板面板的一条提示。
     // outcome: done（带撤销）/ finishing（提示词已发出，没有可撤销的）/ fallback-done（会话不可用但已完成）
     let pendingBoardNotice = null
@@ -1337,11 +1351,6 @@ window.__ModuleLoader__.load({
       return h(IconKanban, { size: 16 })
     }
 
-    /**
-     * 工作树的分支图标。
-     * 卡片脚部用 ⎇ 字形（后面跟着分支名，认得出）；标题栏窄下来只剩图标，
-     * ⎇ 在 12px 下像个小对勾，容易和旁边的「✓ 完成」混，所以这里画一颗真的分支。
-     */
     /** 复制命令的小图标：两张叠起来的纸。 */
     function IconCopy(props) {
       const size = props && Number(props.size) > 0 ? Number(props.size) : 10
@@ -1363,6 +1372,10 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * 工作树的分支图标。⎇ 字形在 12px 下像个小对勾，窄标题栏里容易和
+     * 旁边的「✓ 完成」混，所以画一颗真的分支（卡片 chip 和标题栏共用）。
+     */
     function IconBranch(props) {
       const size = props && Number(props.size) > 0 ? Number(props.size) : 12
       return h(
@@ -3612,7 +3625,17 @@ window.__ModuleLoader__.load({
                         : statusLabelOf(state),
                 },
               ),
-              h('button', { type: 'button', className: 'fxk-title', title: card.title }, card.title),
+              h('button', {
+                type: 'button',
+                className: 'fxk-title',
+                title: card.title,
+                // 标题自己是按钮：键盘 Enter / Space 也能打开会话（整行 onClick 不响应键盘）；
+                // 挡掉冒泡，免得和整行的 onClick 双开
+                onClick: (event) => {
+                  event.stopPropagation()
+                  openCard(card)
+                },
+              }, card.title),
               attachmentCount
                 ? h('span', { className: 'fxk-att', title: t('附件', 'Attachments') }, `📎 ${attachmentCount}`)
                 : null,
@@ -3704,8 +3727,7 @@ window.__ModuleLoader__.load({
         )
       }
 
-      /** 点完成前的确认：分支上还有没合并的提交。 */
-      /** 点完成前的确认：分支还没合回去，或者检出里还有没提交的改动。 */
+      /** 点完成前的确认：分支还没合回去，或者检出里还有未提交的改动。 */
       const doneConfirmCard = doneConfirm ? doneConfirm.card : null
       const doneConfirmMerge = doneConfirmCard && doneConfirmCard.worktree ? doneConfirmCard.worktree.merge : null
       const canAskSession = Boolean(
@@ -4005,6 +4027,8 @@ window.__ModuleLoader__.load({
               defaultWorkspaceId: currentWorkspaceId || null,
               worktreeOffered: Boolean(board && board.settings && board.settings.worktree && board.settings.worktree.offer),
               worktreeAvailable: Boolean(board && board.advanced && board.advanced.capabilities && board.advanced.capabilities.worktrees),
+              attachmentLimitBytes:
+                board && board.advanced && board.advanced.limits ? board.advanced.limits.maxCardAttachmentBytes : null,
               post,
               notify,
               onSaved: handleSaved,
@@ -4056,7 +4080,9 @@ window.__ModuleLoader__.load({
 
     // ---------------------------------------------------------------- editor
     function Editor(props) {
-      const { mode, card, workspaces, defaultWorkspaceId, worktreeOffered, worktreeAvailable, post, notify, onSaved, onClose } = props
+      const { mode, card, workspaces, defaultWorkspaceId, worktreeOffered, worktreeAvailable, attachmentLimitBytes, post, notify, onSaved, onClose } = props
+      // 附件上限跟 Host 配置走（cordis.patch.yml 可改）；没拿到（看板还没读完）时用默认值
+      const attachmentLimit = Number(attachmentLimitBytes) > 0 ? Number(attachmentLimitBytes) : MAX_CARD_BYTES
       // 只回填用户手写的标题；派生标题留空，由占位符和下面的会话名预览兜住
       const [title, setTitle] = useState(card ? (typeof card.titleInput === 'string' ? card.titleInput : card.title) : '')
       const [body, setBody] = useState(card ? card.body : '')
@@ -4210,8 +4236,8 @@ window.__ModuleLoader__.load({
           const next = []
           for (const file of files) {
             const isImage = IMAGE_TYPES.includes(file.type)
-            if (projected + file.size > MAX_CARD_BYTES) {
-              setError(t(`附件总大小超过 ${Math.round(MAX_CARD_BYTES / 1024 / 1024)} MB`, `Attachments exceed ${Math.round(MAX_CARD_BYTES / 1024 / 1024)} MB`))
+            if (projected + file.size > attachmentLimit) {
+              setError(t(`附件总大小超过 ${formatBytes(attachmentLimit)}`, `Attachments exceed ${formatBytes(attachmentLimit)}`))
               break
             }
             projected += file.size
@@ -4235,7 +4261,7 @@ window.__ModuleLoader__.load({
             markDirty()
           }
         },
-        [totalBytes, markDirty],
+        [totalBytes, markDirty, attachmentLimit],
       )
 
       const save = useCallback(
@@ -4524,7 +4550,7 @@ window.__ModuleLoader__.load({
                   },
                 }),
               ),
-              h('div', { className: 'fxk-hint' }, formatBytes(totalBytes), t(' 已用（上限 24 MB）', ' used (24 MB limit)')),
+              h('div', { className: 'fxk-hint' }, formatBytes(totalBytes), t(` 已用（上限 ${formatBytes(attachmentLimit)}）`, ` used (${formatBytes(attachmentLimit)} limit)`)),
             ),
             h(
               'div',
@@ -4777,7 +4803,7 @@ window.__ModuleLoader__.load({
       const load = useCallback(async () => {
         try {
           const next = await fetchSessionCard(sessionId)
-          headerCardCache.set(sessionId, next.card)
+          rememberHeaderCard(sessionId, next.card)
           if (alive.current) {
             setCard(next.card)
             setMergeStateOn(next.mergeState)
@@ -4803,7 +4829,7 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (running && card && card.sessionId === sessionId && card.status === 'done') {
           const next = { ...card, status: 'review', doneAt: null }
-          headerCardCache.set(sessionId, next)
+          rememberHeaderCard(sessionId, next)
           setCard(next)
         }
         if (wasRunning.current && !running) void load()
@@ -4900,7 +4926,7 @@ window.__ModuleLoader__.load({
               ? 'fallback-done'
               : 'done'
         outcomeRef.current = outcome
-        headerCardCache.set(sessionId, updated)
+        rememberHeaderCard(sessionId, updated)
         if (!alive.current) return
         setCard(updated)
         setPhase('idle')

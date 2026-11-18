@@ -262,8 +262,8 @@ Host 接口和各条链路。版本以 [`package.json`](../package.json) 为准�
 - 看板数据：`$DSH_HOME/dsh-kanban-fx/board.json`（默认 `~/.dsh/dsh-kanban-fx/board.json`）。
   卸载插件后数据仍留在磁盘上。
 - 存储版本 `version: 2`：`title` 从 v2 起只存**用户手写的标题**（空串 = 自动取正文首行）；
-  加载 v1 数据时会按老派生规则把自动标题迁成空串。看板接口里的卡片另外带 `titleInput`（手写原文）与
-  `titleDerived`（是否自动），`title` 是 Host 实时派生的展示标题。
+  加载 v1 数据时会按老派生规则把自动标题迁成空串。看板接口里的卡片另外带 `titleInput`（手写原文），
+  `title` 是 Host 实时派生的展示标题。
 - 用户设置：`settings.completion = { mode: 'none' | 'prompt', prompt: string }`，默认 `none`；
   `prompt` 最多 4000 字符，明文存在 `board.json`。这是**可选新增字段**，旧文件没有就按默认读，
   所以存储版本仍保持 2，不触发标题迁移。
@@ -288,7 +288,7 @@ Host 接口和各条链路。版本以 [`package.json`](../package.json) 为准�
 | `GET /kanban-fx/events` | SSE：有变化推 `rev`（25 秒没变化也会推 `beat` 心跳）；客户端收到 `rev` 后自己重读 `/board` |
 | `GET /kanban-fx/attachment?id=` | 卡片附件的原图 / 原文件 |
 | `GET /kanban-fx/card?sessionId=` | 会话对应的卡片（给会话页标题栏用）；不是看板卡片返回 `card: null`；卡片附带 `completionMode` 供 tooltip 用 |
-| `POST /kanban-fx/card` | `{action: create \| update \| delete \| run \| done \| undone, ...}`；`done` 传 `id` 或 `sessionId` 都可以 |
+| `POST /kanban-fx/card` | `{action: create \| update \| delete \| run \| done \| undone \| merge, ...}`；`done` 传 `id` 或 `sessionId` 都可以 |
 | `POST /kanban-fx/settings` | `{settings:{completion?:{mode:'none'\|'prompt', prompt}, worktree?:{offer:boolean}}}`；两段各自可缺省，按当前值合并后严格校验，返回完整看板载荷 |
 
 完成接口的 `done` 响应多两个字段：`completionResult`（`done` / `sent` / `fallback-done`）和
@@ -305,7 +305,10 @@ Host 接口和各条链路。版本以 [`package.json`](../package.json) 为准�
    `plugin:worktree/created` 事件；看板记下返回的 `path / branch / baseCommit / repositoryRoot`。
    建树期间卡片 `preparingSince` 非空（状态仍是进行中，显示「准备工作树」），`reconcile` 不猜它结束；
    失败则清标记、把中文原因写进 `card.worktree.error`、卡片回待办，重试换一个带随机后缀的分支名（只重试一次）。
-5. `agent.followup({ id, role:'user', content, source:{kind:'user'} })` 立刻开跑。
+5. `agent.followup({ id, role:'user', content, source:{kind:'user'} })` 立刻开跑。投递抛错时把
+   「这一轮开始了」的标记（`runningSince` / `lastRunStartedAt` / `doneAt`）原样还回去：
+   没跑过的卡回待办、可编辑重试；跑过的卡回到它本来的状态。执行入口有并发锁，
+   看板 + 列表同时点也不会给同一张卡建两个会话。
 6. 监听 `session/event` 的 `turn/start` / `turn/end` 维护状态与计时。
 
 ### 等你回答（不是第五种状态）

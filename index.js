@@ -512,7 +512,6 @@ function viewOf(card) {
     // title 是展示标题（手写 → 正文首行 → 附件名），titleInput 才是用户亲手写的那份
     title,
     titleInput: card.title || '',
-    titleDerived: !(card.title || '').trim(),
     body: card.body,
     workspaceId: card.workspaceId,
     attachments: card.attachments.map((attachment) => ({
@@ -536,6 +535,8 @@ function viewOf(card) {
       requested: Boolean(card.worktree && card.worktree.requested),
       branch: (card.worktree && card.worktree.branch) || null,
       path: (card.worktree && card.worktree.path) || null,
+      // 复制合并 / 清理命令要用仓库根：漏发这个字段，客户端的复制按钮会静默复制不出任何东西
+      repositoryRoot: (card.worktree && card.worktree.repositoryRoot) || null,
       phase: (card.worktree && card.worktree.phase) || null,
       error: (card.worktree && card.worktree.error) || null,
       merge: card.worktree && card.worktree.merge ? { ...card.worktree.merge } : null,
@@ -561,7 +562,9 @@ function loadStore(file) {
   if (!existsSync(file)) return emptyStore()
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'))
-    if (!parsed || typeof parsed !== 'object' || !parsed.cards || typeof parsed.cards !== 'object') return emptyStore()
+    if (!parsed || typeof parsed !== 'object' || !parsed.cards || typeof parsed.cards !== 'object') {
+      throw new Error('数据文件结构不对（缺少 cards）')
+    }
     const cards = {}
     // v1 的 title 存的是「展示标题」（可能是自动取的正文首行），v2 起只存手写标题。
     const fromVersion = Number(parsed.version) || 1
@@ -633,7 +636,23 @@ function loadStore(file) {
     }
   } catch (error) {
     console.error('[kanban-fx] 读取看板数据失败，改用空看板：', error?.message ?? error)
+    backupUnreadableStore(file)
     return emptyStore()
+  }
+}
+
+/**
+ * 读不出来的数据文件先改名留档：不备份的话，空看板的下一次保存（防抖最快 120ms 后）
+ * 会把可能还能抢救的数据原位覆盖掉，全部卡片无提示丢失。
+ */
+function backupUnreadableStore(file) {
+  if (!existsSync(file)) return
+  const backup = `${file}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`
+  try {
+    renameSync(file, backup)
+    console.error('[kanban-fx] 原文件已留档：', backup)
+  } catch (backupError) {
+    console.error('[kanban-fx] 原文件留档失败（新数据会照常写入）：', backupError?.message ?? backupError)
   }
 }
 
@@ -659,10 +678,8 @@ export function apply(ctx, config) {
     if (card.sessionId) bySession.set(card.sessionId, card)
   }
 
-  function indexCard(card) {
-    if (!card.sessionId) return
-    bySession.set(card.sessionId, card)
-  }
+  /** card.id → 正在走执行流程的卡：runCard 从入口检查到真正置位运行标记隔着多个 await，不占住会被并发请求双开。 */
+  const startingCards = new Set()
 
   function writeStore() {
     if (persistPending) {
@@ -1078,9 +1095,23 @@ export function apply(ctx, config) {
     touch(card, 'worktree-ready')
   }
 
-  /** 执行一张卡片：没有会话就建一个（挂到卡片的工作区下），再把内容投进去并开跑。 */
+  /** 执行一张卡片：占好并发锁再交给 startCard；看板和列表各有一个执行入口，双击 / 双标签页不能建出两个会话。 */
   async function runCard(card) {
-    if (card.runningSince || card.preparingSince) throw httpError(409, '这个卡片正在运行')
+    // 检查和占位必须同步完成：从入口到真正置位运行标记隔着好几个 await，不占住的话
+    // 并发请求都会穿过检查。锁在 startCard 结束（含失败）后释放。
+    if (card.runningSince || card.preparingSince || startingCards.has(card.id)) {
+      throw httpError(409, '这个卡片正在运行')
+    }
+    startingCards.add(card.id)
+    try {
+      return await startCard(card)
+    } finally {
+      startingCards.delete(card.id)
+    }
+  }
+
+  /** 执行的主体（调用方已占好这张卡的锁）：没有会话就建一个（挂到卡片的工作区下），再把内容投进去并开跑。 */
+  async function startCard(card) {
     if (!(card.body || '').trim() && card.attachments.length === 0 && !(card.title || '').trim()) {
       throw httpError(400, '卡片是空的，先写点内容')
     }
@@ -1148,7 +1179,14 @@ export function apply(ctx, config) {
 
     await prepareWorktree(card, agent, createdSession)
 
-    // 先记「进行中」：turn/start 事件到达后会覆盖成真实开始时间
+    // 先记「进行中」：turn/start 事件到达后会覆盖成真实开始时间。
+    // 快照留着：投递失败时原样还回去，别让一张从没跑起来的卡被 statusOf 判成待审核。
+    const previous = {
+      runningSince: card.runningSince,
+      lastRunStartedAt: card.lastRunStartedAt,
+      lastRunEndedAt: card.lastRunEndedAt,
+      doneAt: card.doneAt,
+    }
     card.runningSince = Date.now()
     card.lastRunStartedAt = card.runningSince
     card.lastRunEndedAt = null
@@ -1170,7 +1208,9 @@ export function apply(ctx, config) {
     try {
       agent.followup(message)
     } catch (error) {
-      card.runningSince = null
+      // lastRunStartedAt 只在真的投递过内容时才有值：留着它，statusOf 会把卡片判成
+      // 待审核，客户端也不再给「回编辑」的出口。连同 doneAt 一起回到点执行之前的样子。
+      Object.assign(card, previous)
       card.error = String(error?.message ?? error)
       touch(card, 'run-failed')
       throw httpError(500, `投递失败：${card.error}`)

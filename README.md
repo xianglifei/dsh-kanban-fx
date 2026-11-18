@@ -6,7 +6,7 @@
 点「执行」就直接在对应工作区开会话、把卡片内容投进去开跑；跑完、报错、暂停，状态都挂在卡片上，
 回看板就知道做到哪了。
 
-[![version](https://img.shields.io/badge/version-0.9.1-1f6feb?style=flat-square)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.9.2-1f6feb?style=flat-square)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-3fb950?style=flat-square)](LICENSE)
 [![DSH](https://img.shields.io/badge/DSH-%5E0.2.2--rc.1-8957e5?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
 
@@ -67,7 +67,7 @@ dsh plugin --profile desktop add link:/path/to/dsh-kanban-fx
 
 | 状态 | 什么时候 |
 |---|---|
-| **待办** | 卡片还没有会话 |
+| **待办** | 卡片还没有会话，或建了会话但一次都没真的跑起来（投递 / 建工作树失败，回到编辑改完重试） |
 | **进行中** | 会话里有一轮还没结束（卡片上实时计时） |
 | **待审核** | 这一轮结束了，等你验收（报错的卡片带「有报错」徽标） |
 | **已完成** | 你点了完成；或「完成之后」配了收尾提示词，并且收尾轮正常结束 |
@@ -132,7 +132,8 @@ v1 不支持拖拽或手动改状态。
 ## 数据
 
 - 看板数据：`$DSH_HOME/dsh-kanban-fx/board.json`（默认 `~/.dsh/dsh-kanban-fx/board.json`）。卸载插件后数据仍留在磁盘上。
-- 单张卡片正文上限 20 万字符，附件总量 24 MB（在 `cordis.patch.yml` 里改，重启生效）。
+  文件读不出来（损坏 / 结构不对）时，启动会先把它留档成 `board.json.corrupt-<时间戳>` 再从空看板起步，不会无提示地覆盖掉。
+- 单张卡片正文上限 20 万字符，附件总量 24 MB（在 `cordis.patch.yml` 里改，重启生效）；编辑器里显示和校验的上限跟着这个配置走。
 - 卡片编号 `fx-1`、`fx-2`……点一下复制，方便在会话里直接说「处理 fx-12」；编号只增不复用。
 
 ## 常见问题
