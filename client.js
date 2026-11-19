@@ -26,9 +26,12 @@ window.__ModuleLoader__.load({
     // 设置页：收尾提示词上限跟 Host 保持一致；停手 600ms 自动保存
     const PROMPT_MAX_CHARS = 4000
     const SETTINGS_SAVE_IDLE_MS = 600
-    // 看板是「某个工作区的视图」，没有「全部」。视图工作区记在浏览器本地：
+    // 看板默认停在「某个工作区」，也可以停在「全部工作区」。视图工作区记在浏览器本地：
     // 优先级 localStorage → defaultWorkspaceId（= 校验过的 lastWorkspaceId）→ 工作区列表第一个。
     const VIEW_WORKSPACE_KEY = 'dsh-kanban-fx.view-workspace'
+    // 「全部工作区」不是真实工作区，只是浏览器本地的一个视图值：只有存在两个以上工作区时才给这个
+    // 选项（只有一个时它和那个工作区完全等价），不写进服务端的 lastWorkspaceId。
+    const BUCKET_ALL = 'all'
     // 不属于任何现存工作区的卡片（历史数据 / 工作区被删）用这两个抽屉兜住，平时不出现
     const BUCKET_NONE = 'none'
     const BUCKET_MISSING = 'missing'
@@ -570,6 +573,15 @@ window.__ModuleLoader__.load({
 /* 分支 chip 的结构：图标 + 分支名（可收缩）+ 合并状态（不收缩）。
    合并状态只陈述 Git 事实，不参与卡片状态机；分支删了给名字加删除线。 */
 .fxk-chip-branch { gap: 4px; }
+/* 工作区 chip：只在「全部工作区」里出现，而且本身就是按钮（点一下只看这个工作区）。
+   外观沿用普通 chip，只补按钮的默认边框和 hover——它不该比旁边的分支 chip 更抢眼。 */
+.fxk-chip-ws { border: 0; cursor: pointer; }
+.fxk-chip-ws:hover { background: color-mix(in srgb, var(--fxk-text-3) 16%, transparent); color: var(--fxk-text); }
+/* 已完成折叠行里的那一枚：行很窄，先收名字、再整枚收起（和右侧合并结论同一套取舍） */
+.fxk-ws-folded { flex: none; max-width: 96px; }
+@container (max-width: 220px) {
+  .fxk-ws-folded { display: none; }
+}
 .fxk-chip-branch > svg { flex: none; display: block; }
 .fxk-wt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .fxk-wt-name.is-gone { text-decoration: line-through; opacity: .72; }
@@ -2744,8 +2756,15 @@ window.__ModuleLoader__.load({
         board && board.defaultWorkspaceId && workspaceIds.includes(board.defaultWorkspaceId)
           ? board.defaultWorkspaceId
           : (workspaceIds[0] || '')
+      // 「全部工作区」只在真的不止一个工作区时出现：只有一个时它和那个工作区完全等价，
+      // 多一个状态只是噪音；工作区被删到只剩一个时，这条会把它自动收掉。
+      const allSelectable = workspaces.length >= 2
       const isSelectable = (id) =>
-        Boolean(id) && (workspaceIds.includes(id) || (id === BUCKET_NONE && orphanCards.length > 0) || (id === BUCKET_MISSING && missingCards.length > 0))
+        Boolean(id) &&
+        (workspaceIds.includes(id) ||
+          (id === BUCKET_ALL && allSelectable) ||
+          (id === BUCKET_NONE && orphanCards.length > 0) ||
+          (id === BUCKET_MISSING && missingCards.length > 0))
       // 用户上次选的视图 → 服务端默认工作区 → 异常抽屉（只在有这类卡片时）
       let activeWorkspaceId = null
       if (isSelectable(pickedWorkspaceId)) activeWorkspaceId = pickedWorkspaceId
@@ -2872,6 +2891,9 @@ window.__ModuleLoader__.load({
       const handleSaved = useCallback(
         (saved) => {
           if (!saved || !saved.workspaceId) return
+          // 「全部工作区」里哪张卡都看得见，不需要跟：跟过去会让人在全局视图里建第二张卡时
+          // 被自动保存一路踢到某个工作区去。
+          if (activeWorkspaceId === BUCKET_ALL) return
           if (saved.workspaceId === activeWorkspaceId) return
           selectWorkspace(saved.workspaceId)
         },
@@ -3047,6 +3069,11 @@ window.__ModuleLoader__.load({
 
       const visibleCards = useMemo(() => {
         return cards.filter((card) => {
+          if (activeWorkspaceId === BUCKET_ALL) {
+            // 「全部」只收归属明确、工作区还在的卡；孤儿 / 工作区已被删的卡留在各自的抽屉里，
+            // 那些是「要修的数据」，混进全局视图只会稀释信号。
+            return Boolean(card.workspaceId) && workspaceIds.includes(card.workspaceId)
+          }
           if (activeWorkspaceId === BUCKET_NONE) return !card.workspaceId
           if (activeWorkspaceId === BUCKET_MISSING) return Boolean(card.workspaceId) && !workspaceIds.includes(card.workspaceId)
           if (!activeWorkspaceId) return true
@@ -3099,12 +3126,49 @@ window.__ModuleLoader__.load({
         return Math.max(0, now - skewRef.current - card.awaitingSince)
       }
 
+      /**
+       * 「全部工作区」里卡片上的工作区 chip。
+       * 只有这个视图需要它：其它视图里每张卡的工作区都一样，信息恒等于顶栏那个选择。
+       * 它本身是按钮——点一下就把看板收窄到那个工作区，不用再回顶栏找。
+       */
+      const workspaceChipOf = (card, className) => {
+        const name = workspaceTitle(card.workspaceId)
+        if (activeWorkspaceId !== BUCKET_ALL || !name) return null
+        return h(
+          'button',
+          {
+            type: 'button',
+            className: className ? `fxk-chip fxk-chip-ws ${className}` : 'fxk-chip fxk-chip-ws',
+            title: t(`只看「${name}」`, `Show only “${name}”`),
+            'aria-label': t(`只看工作区「${name}」`, `Show only workspace “${name}”`),
+            onClick: (event) => {
+              // chip 长在整张卡（role=button）里面：别让点它变成打开会话
+              event.stopPropagation()
+              selectWorkspace(card.workspaceId)
+            },
+          },
+          name,
+        )
+      }
+
       const renderCard = (card) => {
         const state = card.status
         const isDone = state === 'done'
         const isFolded = isDone && !expandedDone.has(card.id)
         const title = workspaceTitle(card.workspaceId)
         const attachmentCount = (card.attachments || []).length
+        // 卡片中段那一行 chip。可能一个都没有（普通卡 + 关了合并状态）：那就整行不渲染，
+        // 否则空 div 会被 .fxk-card 的 gap 撑出两段空白。
+        const metaChips = [
+          workspaceChipOf(card),
+          card.workspaceId && !title ? h('span', { className: 'fxk-chip fxk-chip-warn' }, t('工作区不可用', 'Workspace missing')) : null,
+          worktreeChipOf(card, mergeStateOn, copyMergeCommand),
+          attachmentCount ? h('span', { className: 'fxk-chip', title: t('附件', 'Attachments') }, `📎 ${attachmentCount}`) : null,
+          card.sessionArchived
+            ? h('span', { className: 'fxk-chip fxk-chip-warn', title: t('会话已归档', 'Conversation archived') }, t('会话已归档', 'Archived'))
+            : null,
+          card.error ? h('span', { className: 'fxk-chip fxk-chip-err', title: card.error }, t('有报错', 'Error')) : null,
+        ].filter(Boolean)
 
         // 已完成列默认只留标题行：整行点开才展开成完整卡片，避免已归档的卡片一直占满一整列。
         if (isFolded) {
@@ -3131,6 +3195,7 @@ window.__ModuleLoader__.load({
             },
             h('span', { className: 'fxk-caret', 'aria-hidden': 'true' }),
             h('span', { className: 'fxk-card-title fxk-card-title-folded' }, card.title),
+            workspaceChipOf(card, 'fxk-ws-folded'),
             foldedMergeOf(card),
           )
         }
@@ -3183,16 +3248,7 @@ window.__ModuleLoader__.load({
           },
           titleNode,
           card.body ? h('div', { className: 'fxk-card-excerpt' }, excerptOf(card.body)) : null,
-          h(
-            'div',
-            { className: 'fxk-card-meta' },
-            title ? h('span', { className: 'fxk-chip', title }, title) : null,
-            card.workspaceId && !title ? h('span', { className: 'fxk-chip fxk-chip-warn' }, t('工作区不可用', 'Workspace missing')) : null,
-            worktreeChipOf(card, mergeStateOn, copyMergeCommand),
-            attachmentCount ? h('span', { className: 'fxk-chip', title: t('附件', 'Attachments') }, `📎 ${attachmentCount}`) : null,
-            card.sessionArchived ? h('span', { className: 'fxk-chip fxk-chip-warn', title: t('会话已归档', 'Conversation archived') }, t('会话已归档', 'Archived')) : null,
-            card.error ? h('span', { className: 'fxk-chip fxk-chip-err', title: card.error }, t('有报错', 'Error')) : null,
-          ),
+          metaChips.length > 0 ? h('div', { className: 'fxk-card-meta' }, ...metaChips) : null,
           state === 'running'
             ? h(
                 'div',
@@ -3636,6 +3692,7 @@ window.__ModuleLoader__.load({
                   openCard(card)
                 },
               }, card.title),
+              workspaceChipOf(card),
               attachmentCount
                 ? h('span', { className: 'fxk-att', title: t('附件', 'Attachments') }, `📎 ${attachmentCount}`)
                 : null,
@@ -3710,7 +3767,13 @@ window.__ModuleLoader__.load({
                       ? h(
                           'tr',
                           null,
-                          h('td', { colSpan: LIST_COLUMNS.length, className: 'fxk-empty-cell' }, t('这个工作区还没有卡片。', 'No cards in this workspace yet.')),
+                          h(
+                            'td',
+                            { colSpan: LIST_COLUMNS.length, className: 'fxk-empty-cell' },
+                            activeWorkspaceId === BUCKET_ALL
+                              ? t('还没有卡片。', 'No cards yet.')
+                              : t('这个工作区还没有卡片。', 'No cards in this workspace yet.'),
+                          ),
                         )
                       : sortedCards.map(renderListRow),
                 ),
@@ -3838,8 +3901,10 @@ window.__ModuleLoader__.load({
           )
         : null
 
-      // 看板视图 = 一个工作区。异常抽屉只在真的存在这类卡片时出现，平时完全看不到。
+      // 看板视图 = 一个工作区；两个以上工作区时还能选「全部工作区」。
+      // 异常抽屉只在真的存在这类卡片时出现，平时完全看不到。
       const filterOptions = [
+        ...(allSelectable ? [{ value: BUCKET_ALL, label: t('全部工作区', 'All workspaces') }] : []),
         ...workspaces.map((workspace) => ({ value: workspace.id, label: workspace.title })),
         ...(orphanCards.length > 0
           ? [{ value: BUCKET_NONE, label: `${t('未指定工作区', 'No workspace')} · ${orphanCards.length}` }]
