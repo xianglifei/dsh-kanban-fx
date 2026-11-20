@@ -177,6 +177,56 @@ window.__ModuleLoader__.load({
       return column ? t(column.zh, column.en) : String(status || '')
     }
 
+    /**
+     * 视图停在哪个工作区：本地上次的选择 → 服务端默认（校验过的 lastWorkspaceId）
+     * → 「未指定工作区」抽屉 → 「工作区不可用」抽屉。
+     * 「全部工作区」只在有两个以上工作区时才算合法落点（只有一个时它和那个工作区等价，
+     * 多一个状态只是噪音）；工作区被删到只剩一个时，这里会自动把它收掉。
+     * 抽成纯函数是为了能单独验：这是全看板最容易「静默挑错工作区」的一段。
+     */
+    function resolveViewWorkspace({ picked, workspaceIds, fallbackId, hasOrphan, hasMissing }) {
+      const selectable = (id) =>
+        Boolean(id) &&
+        (workspaceIds.includes(id) ||
+          (id === BUCKET_ALL && workspaceIds.length >= 2) ||
+          (id === BUCKET_NONE && hasOrphan) ||
+          (id === BUCKET_MISSING && hasMissing))
+      if (selectable(picked)) return picked
+      if (fallbackId) return fallbackId
+      if (hasOrphan) return BUCKET_NONE
+      if (hasMissing) return BUCKET_MISSING
+      return null
+    }
+
+    /**
+     * 当前视图里该显示哪些卡。
+     * 「全部工作区」只收归属明确、工作区还在的卡：孤儿 / 工作区已被删的卡留在各自的抽屉里，
+     * 那些是「要修的数据」，混进全局视图只会稀释信号。
+     */
+    function filterVisibleCards({ cards, workspaceId, workspaceIds }) {
+      return cards.filter((card) => {
+        if (workspaceId === BUCKET_ALL) return Boolean(card.workspaceId) && workspaceIds.includes(card.workspaceId)
+        if (workspaceId === BUCKET_NONE) return !card.workspaceId
+        if (workspaceId === BUCKET_MISSING) return Boolean(card.workspaceId) && !workspaceIds.includes(card.workspaceId)
+        if (!workspaceId) return true
+        return card.workspaceId === workspaceId
+      })
+    }
+
+    /**
+     * 关侧栏时该做什么。单独抽出来是因为这里最容易出「手滑丢内容」：
+     * blocked = 在「全部工作区」里新建、还没选工作区——这张卡从来没落过库，关掉就等于丢掉输入。
+     * 返回：'warn' 只提示不关 / 'arm' 点亮 ✕ 的二次确认 / 'close' 直接关 / 'flush' 先补存再关。
+     */
+    function closeIntentOf({ blocked, hasContent, dirty, source, discardArmed }) {
+      if (blocked && hasContent) {
+        // Esc / 点背景永远不关：连按两下不该被当成「确认放弃」
+        if (source !== 'x') return 'warn'
+        return discardArmed ? 'close' : 'arm'
+      }
+      return dirty && hasContent ? 'flush' : 'close'
+    }
+
     // ------------------------------------------- session header (card status)
     // 会话 → 卡片的探测结果：命中先画、再后台刷新，切回会话时标题栏不会闪一下空。
     // 只留最近 HEADER_CACHE_MAX 条：webview 长挂时无上限的缓存会一直涨。
@@ -929,6 +979,8 @@ window.__ModuleLoader__.load({
 .fxk-autosave[data-kind="dirty"] { color: var(--fxk-text-2); }
 .fxk-autosave[data-kind="saving"] { color: var(--fxk-text-2); }
 .fxk-autosave[data-kind="error"] { color: color-mix(in srgb, var(--fxk-err) 80%, var(--fxk-text)); }
+/* 「还没选工作区所以没存」：这是待办，不是失败也不该被忽略，用琥珀提醒 */
+.fxk-autosave[data-kind="blocked"] { color: color-mix(in srgb, var(--fxk-warn) 70%, var(--fxk-text)); }
 .fxk-field { display: flex; flex-direction: column; gap: 6px; }
 .fxk-label { font-size: 12px; line-height: 18px; color: var(--fxk-text-2); }
 .fxk-input, .fxk-textarea {
@@ -2759,20 +2811,21 @@ window.__ModuleLoader__.load({
       // 「全部工作区」只在真的不止一个工作区时出现：只有一个时它和那个工作区完全等价，
       // 多一个状态只是噪音；工作区被删到只剩一个时，这条会把它自动收掉。
       const allSelectable = workspaces.length >= 2
-      const isSelectable = (id) =>
-        Boolean(id) &&
-        (workspaceIds.includes(id) ||
-          (id === BUCKET_ALL && allSelectable) ||
-          (id === BUCKET_NONE && orphanCards.length > 0) ||
-          (id === BUCKET_MISSING && missingCards.length > 0))
-      // 用户上次选的视图 → 服务端默认工作区 → 异常抽屉（只在有这类卡片时）
-      let activeWorkspaceId = null
-      if (isSelectable(pickedWorkspaceId)) activeWorkspaceId = pickedWorkspaceId
-      else if (fallbackWorkspaceId) activeWorkspaceId = fallbackWorkspaceId
-      else if (orphanCards.length > 0) activeWorkspaceId = BUCKET_NONE
-      else if (missingCards.length > 0) activeWorkspaceId = BUCKET_MISSING
-      // 新建卡片必须落到一个真实工作区：视图停在异常抽屉时退回服务端默认值
-      const currentWorkspaceId = workspaceIds.includes(activeWorkspaceId) ? activeWorkspaceId : fallbackWorkspaceId
+      const activeWorkspaceId = resolveViewWorkspace({
+        picked: pickedWorkspaceId,
+        workspaceIds,
+        fallbackId: fallbackWorkspaceId,
+        hasOrphan: orphanCards.length > 0,
+        hasMissing: missingCards.length > 0,
+      })
+      // 新建卡片必须落到一个真实工作区：视图停在异常抽屉时退回服务端默认值。
+      // 「全部工作区」不同——那里没有「当前工作区」，交给编辑器要求用户显式选一个，
+      // 免得把卡片静默归到某个仓库下。
+      const currentWorkspaceId = workspaceIds.includes(activeWorkspaceId)
+        ? activeWorkspaceId
+        : activeWorkspaceId === BUCKET_ALL
+          ? ''
+          : fallbackWorkspaceId
       const running = cards.some((card) => card.status === 'running')
 
       useEffect(() => {
@@ -3067,19 +3120,10 @@ window.__ModuleLoader__.load({
         })
       }, [])
 
-      const visibleCards = useMemo(() => {
-        return cards.filter((card) => {
-          if (activeWorkspaceId === BUCKET_ALL) {
-            // 「全部」只收归属明确、工作区还在的卡；孤儿 / 工作区已被删的卡留在各自的抽屉里，
-            // 那些是「要修的数据」，混进全局视图只会稀释信号。
-            return Boolean(card.workspaceId) && workspaceIds.includes(card.workspaceId)
-          }
-          if (activeWorkspaceId === BUCKET_NONE) return !card.workspaceId
-          if (activeWorkspaceId === BUCKET_MISSING) return Boolean(card.workspaceId) && !workspaceIds.includes(card.workspaceId)
-          if (!activeWorkspaceId) return true
-          return card.workspaceId === activeWorkspaceId
-        })
-      }, [cards, activeWorkspaceId, board])
+      const visibleCards = useMemo(
+        () => filterVisibleCards({ cards, workspaceId: activeWorkspaceId, workspaceIds }),
+        [cards, activeWorkspaceId, board],
+      )
 
       const byColumn = useMemo(() => {
         const groups = { todo: [], running: [], review: [], done: [] }
@@ -4090,6 +4134,8 @@ window.__ModuleLoader__.load({
               card: modal.card,
               workspaces,
               defaultWorkspaceId: currentWorkspaceId || null,
+              // 「全部工作区」里新建：不预填、必须由人显式选一个（见编辑器里的 requireChoice）
+              requireChoice: activeWorkspaceId === BUCKET_ALL,
               worktreeOffered: Boolean(board && board.settings && board.settings.worktree && board.settings.worktree.offer),
               worktreeAvailable: Boolean(board && board.advanced && board.advanced.capabilities && board.advanced.capabilities.worktrees),
               attachmentLimitBytes:
@@ -4145,7 +4191,9 @@ window.__ModuleLoader__.load({
 
     // ---------------------------------------------------------------- editor
     function Editor(props) {
-      const { mode, card, workspaces, defaultWorkspaceId, worktreeOffered, worktreeAvailable, attachmentLimitBytes, post, notify, onSaved, onClose } = props
+      const { mode, card, workspaces, defaultWorkspaceId, requireChoice: requireChoiceProp, worktreeOffered, worktreeAvailable, attachmentLimitBytes, post, notify, onSaved, onClose } = props
+      // 「全部工作区」里新建时没有「当前工作区」可默认：由用户自己选，别替他挑第一个
+      const requireChoice = requireChoiceProp === true
       // 附件上限跟 Host 配置走（cordis.patch.yml 可改）；没拿到（看板还没读完）时用默认值
       const attachmentLimit = Number(attachmentLimitBytes) > 0 ? Number(attachmentLimitBytes) : MAX_CARD_BYTES
       // 只回填用户手写的标题；派生标题留空，由占位符和下面的会话名预览兜住
@@ -4153,10 +4201,14 @@ window.__ModuleLoader__.load({
       const [body, setBody] = useState(card ? card.body : '')
       // 工作区必填：优先卡片自己的（校验它还在），否则用看板当前工作区。
       // 历史卡片没工作区、或工作区已被删时，打开编辑就顺手落到一个有效工作区。
+      // 「全部工作区」里新建是个例外：留空，由人显式选（void 掉 workspaces[0] 那条兜底，
+      // 否则会静默把卡片归到列表第一个仓库）。
       const initialWorkspaceId =
         card && card.workspaceId && workspaces.some((workspace) => workspace.id === card.workspaceId)
           ? card.workspaceId
-          : defaultWorkspaceId || (workspaces[0] && workspaces[0].id) || ''
+          : requireChoice
+            ? ''
+            : defaultWorkspaceId || (workspaces[0] && workspaces[0].id) || ''
       const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId)
       // 工作树意图跟着卡片走；默认不勾，只有建卡的人显式打开才生效
       const [worktreeRequested, setWorktreeRequested] = useState(Boolean(card && card.worktree && card.worktree.requested))
@@ -4170,6 +4222,9 @@ window.__ModuleLoader__.load({
       // 卡片短编号（fx-N）由 Host 在落库时分配；草稿阶段还没有
       const [savedSeq, setSavedSeq] = useState(card && card.seq ? Number(card.seq) : null)
       const [auto, setAuto] = useState({ kind: 'idle', at: 0 })
+      // 「还没选工作区」时点 ✕ 的二次确认：只由 ✕ 按钮点亮，Esc / 点背景不参与，
+      // 免得连按两下 Esc 被当成「确认放弃」。
+      const [discardArmed, setDiscardArmed] = useState(false)
       const fileRef = useRef(null)
       const addedRef = useRef(added)
       addedRef.current = added
@@ -4185,6 +4240,17 @@ window.__ModuleLoader__.load({
       const latest = useRef({})
       latest.current = { title, body, workspaceId, worktreeRequested, kept, added }
 
+      /**
+       * 新建 + 还没有工作区：这张卡没有归属，不能落库。
+       * 它的内容只活在编辑器里，所以自动保存要停、关闭要拦（见 close）。
+       * 只看「有没有工作区」而不看 requireChoice：这样即便编辑期间工作区被删到只剩一个、界面开关变了，
+       * 也不会突然把一张空工作区的卡写进库里。
+       */
+      const blockedByWorkspace = useCallback(
+        () => !savedIdRef.current && !latest.current.workspaceId && workspaces.length > 0,
+        [workspaces.length],
+      )
+
       /** 真正落库一次：create 或 update；返回 { card, created }。 */
       const persist = useCallback(
         (options) => {
@@ -4193,6 +4259,9 @@ window.__ModuleLoader__.load({
             const state = latest.current
             if (!hasContentOf(state)) return null
             if (!opts.force && !dirtyRef.current) return null
+            // 没有归属就不落库：否则自动保存会造出一张不属于任何工作区的孤儿卡，
+            // 直接掉进「未指定工作区」那个抽屉。
+            if (blockedByWorkspace()) return null
             const version = changeRef.current
             const signature = attachmentSignature(state)
             let created = !savedIdRef.current
@@ -4247,7 +4316,7 @@ window.__ModuleLoader__.load({
           chainRef.current = next.then(() => {}, () => {})
           return next
         },
-        [post],
+        [post, blockedByWorkspace],
       )
 
       /** 停手后 1.2 秒存一次。 */
@@ -4266,6 +4335,8 @@ window.__ModuleLoader__.load({
       const markDirty = useCallback(() => {
         dirtyRef.current = true
         changeRef.current += 1
+        // 继续动了就说明不是要放弃：把 ✕ 的二次确认收回去
+        setDiscardArmed(false)
         setAuto((previous) => (previous.kind === 'dirty' ? previous : { kind: 'dirty', at: previous.at }))
         scheduleSoon()
       }, [scheduleSoon])
@@ -4376,26 +4447,59 @@ window.__ModuleLoader__.load({
         [busy, mode, persist, post, notify, onClose],
       )
 
-      /** 关侧栏：先把没落库的改动补存一次；存失败就留在原地提示，不丢内容。 */
-      const close = useCallback(() => {
-        if (busy) return
-        if (timerRef.current) {
-          clearTimeout(timerRef.current)
-          timerRef.current = null
-        }
-        if (!dirtyRef.current || !hasContentOf(latest.current)) {
-          onClose()
-          return
-        }
-        setBusy('close')
-        setError('')
-        persist({ force: true })
-          .then(() => {
-            setBusy('')
-            onClose()
+      /**
+       * 关侧栏：先把没落库的改动补存一次；存失败就留在原地提示，不丢内容。
+       * source: 'x'（标题栏 ✕）/ 'esc' / 'backdrop'。怎么做由 closeIntentOf 决定。
+       */
+      const close = useCallback(
+        (source) => {
+          if (busy) return
+          const intent = closeIntentOf({
+            blocked: blockedByWorkspace(),
+            hasContent: hasContentOf(latest.current),
+            dirty: dirtyRef.current,
+            source,
+            discardArmed,
           })
-          .catch(() => setBusy(''))
-      }, [busy, persist, onClose])
+          if (intent === 'warn') {
+            setError(
+              t(
+                '先选一个所属工作区：这张卡片还没有归属，所以还什么都没保存',
+                'Pick a workspace first — the card has no home yet, so nothing is saved',
+              ),
+            )
+            return
+          }
+          if (intent === 'arm') {
+            setDiscardArmed(true)
+            setError(
+              t(
+                '还没选工作区，这张卡片还没保存；再点一次 ✕ 就是放弃这次输入',
+                'No workspace yet, so nothing is saved — click ✕ again to discard',
+              ),
+            )
+            return
+          }
+          setDiscardArmed(false)
+          if (timerRef.current) {
+            clearTimeout(timerRef.current)
+            timerRef.current = null
+          }
+          if (intent === 'close') {
+            onClose()
+            return
+          }
+          setBusy('close')
+          setError('')
+          persist({ force: true })
+            .then(() => {
+              setBusy('')
+              onClose()
+            })
+            .catch(() => setBusy(''))
+        },
+        [busy, blockedByWorkspace, discardArmed, persist, onClose],
+      )
 
       const remove = useCallback(async () => {
         const id = savedIdRef.current || (card && card.id)
@@ -4427,8 +4531,12 @@ window.__ModuleLoader__.load({
           })
         })
       }
-      const autoText =
-        auto.kind === 'saving'
+      // 「全部工作区」里新建、还没选工作区、但已经写了东西：这时候自动保存是停的。
+      // 这行字必须说实话，否则用户会以为内容已经存进去了。
+      const needWorkspace = !savedId && !workspaceId && workspaces.length > 0 && hasContentOf({ title, body, kept, added })
+      const autoText = needWorkspace
+        ? t('选一个工作区后才会保存', 'Saves once you pick a workspace')
+        : auto.kind === 'saving'
           ? t('自动保存中…', 'Auto-saving…')
           : auto.kind === 'dirty'
             ? t('有改动，稍后自动保存', 'Unsaved changes')
@@ -4447,7 +4555,7 @@ window.__ModuleLoader__.load({
         {
           className: 'fxk-overlay',
           onClick: (event) => {
-            if (event.target === event.currentTarget) close()
+            if (event.target === event.currentTarget) close('backdrop')
           },
         },
         h(
@@ -4458,7 +4566,7 @@ window.__ModuleLoader__.load({
             'aria-modal': 'true',
             'aria-label': heading,
             onKeyDown: (event) => {
-              if (event.key === 'Escape') close()
+              if (event.key === 'Escape') close('esc')
             },
           },
           h(
@@ -4479,7 +4587,7 @@ window.__ModuleLoader__.load({
                 )
               : null,
             h('span', { className: 'fxk-sheet-spacer' }),
-            h('button', { type: 'button', className: 'fxk-btn fxk-btn-icon', disabled: Boolean(busy), 'aria-label': t('关闭', 'Close'), onClick: close }, '✕'),
+            h('button', { type: 'button', className: 'fxk-btn fxk-btn-icon', disabled: Boolean(busy), 'aria-label': t('关闭', 'Close'), onClick: () => close('x') }, '✕'),
           ),
           h(
             'div',
@@ -4632,15 +4740,26 @@ window.__ModuleLoader__.load({
                   },
                 },
                 workspaces.length > 0
-                  ? workspaces.map((workspace) => h('option', { key: workspace.id, value: workspace.id }, workspace.title))
+                  ? [
+                      // 「全部工作区」里新建时这里是空的：给一个禁用占位，明确「还没选」
+                      workspaceId
+                        ? null
+                        : h('option', { key: '__pick', value: '', disabled: true }, t('选择一个工作区…', 'Pick a workspace…')),
+                      ...workspaces.map((workspace) => h('option', { key: workspace.id, value: workspace.id }, workspace.title)),
+                    ]
                   : h('option', { value: '', disabled: true }, t('还没有工作区', 'No workspaces yet')),
               ),
               h(
                 'div',
                 { className: 'fxk-hint' },
-                workspaces.length > 0
-                  ? t('默认就是看板当前的工作区。执行时会在这个工作区里建会话，会话也会出现在侧边栏对应工作区下。', 'Defaults to the board’s current workspace. The run creates a conversation there, listed under it in the sidebar.')
-                  : t('先在 DSH 里创建一个工作区，再回来建待办。', 'Create a workspace in DSH first, then come back.'),
+                workspaces.length === 0
+                  ? t('先在 DSH 里创建一个工作区，再回来建待办。', 'Create a workspace in DSH first, then come back.')
+                  : requireChoice && !workspaceId
+                    ? t(
+                        '你在「全部工作区」里新建，卡片还没有归属：选一个工作区才能保存或执行。',
+                        'You are in “All workspaces”, so the card has no home yet — pick one to save or run.',
+                      )
+                    : t('默认就是看板当前的工作区。执行时会在这个工作区里建会话，会话也会出现在侧边栏对应工作区下。', 'Defaults to the board’s current workspace. The run creates a conversation there, listed under it in the sidebar.'),
               ),
             ),
             // 工作树：只在「设置里给了入口 + DSH 服务在 + 这张卡还没执行过」时出现
@@ -4721,8 +4840,13 @@ window.__ModuleLoader__.load({
               'span',
               {
                 className: 'fxk-autosave',
-                'data-kind': auto.kind,
-                title: t('停手 1.2 秒或每 8 秒自动保存一次；关闭侧栏前会再补存一次。', 'Saves 1.2s after you stop typing and every 8s; flushes once more before closing.'),
+                'data-kind': needWorkspace ? 'blocked' : auto.kind,
+                title: needWorkspace
+                  ? t(
+                      '这张卡片还没有所属工作区，所以什么都没存。选一个工作区就会立刻存下来。',
+                      'Nothing is saved yet because the card has no workspace. Pick one and it saves right away.',
+                    )
+                  : t('停手 1.2 秒或每 8 秒自动保存一次；关闭侧栏前会再补存一次。', 'Saves 1.2s after you stop typing and every 8s; flushes once more before closing.'),
               },
               autoText,
             ),

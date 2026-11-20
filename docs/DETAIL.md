@@ -49,7 +49,11 @@ It is a label on Running, not a fifth status, and it never enters Review until t
 - **List**: a flat sortable table, status shown as an inline pill (a waiting card reads "Waiting" and its
   duration cell shows how long it has waited). Medium widths drop the number / duration /
   updated columns; narrow screens keep only Task and Actions.
-- One workspace at a time. The workspace switcher is not a filter — there is no "All workspaces".
+- **Workspace switcher** (top right): one workspace at a time by default. With two or more workspaces it also
+  offers **All workspaces**, putting every repository's cards on one board; the option is hidden when only one
+  workspace exists. Creating a card there leaves the workspace empty until you pick one — nothing is saved before that.
+- In the All view every card carries a small workspace chip (click it to narrow the board to that workspace).
+  Other views hide it, because there the chip would only repeat the switcher.
 - View and sort order are stored in browser localStorage.
 
 ## Finish behavior
