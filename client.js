@@ -828,6 +828,11 @@ window.__ModuleLoader__.load({
 .fxk-sort { display: inline-flex; opacity: .55; transition: opacity 120ms; }
 .fxk-thbtn:hover .fxk-sort { opacity: .85; }
 .fxk-thbtn[data-active="true"] .fxk-sort { opacity: 1; }
+/* 「任务」表头里的留白：和行内一样先让出状态点 / 编号的位置。
+   .fxk-thbtn 的 gap 是 4px，这里各补 4px，合成和 .fxk-task 相同的 8px 间距。
+   状态点只是占位，不能真画出来。 */
+.fxk-thbtn > .fxk-mob-dot, .fxk-thbtn > .fxk-task-seq { margin-right: 4px; }
+.fxk-thbtn > .fxk-mob-dot { visibility: hidden; }
 
 /* 行：单行标题，列宽固定，只有文字省略，不换行 */
 .fxk-table tbody td {
@@ -843,12 +848,17 @@ window.__ModuleLoader__.load({
 .fxk-table tbody tr:hover td { background: var(--fxk-hover); }
 .fxk-table tbody tr:focus-within td { background: color-mix(in srgb, var(--fxk-link) 6%, transparent); }
 .fxk-td-seq { font-family: var(--fxk-mono); font-size: 10.5px; line-height: 16px; letter-spacing: .02em; color: var(--fxk-text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* 列表窄 / 中宽度时「编号」列整列收起，编号改在任务标题前用等宽小字给出；
-   宽屏有独立的编号列，这里就不重复显示（两者二选一）。 */
+/* 只有手机版（≤700px）才收起「编号」列，编号改在任务标题前用等宽小字给出；
+   701px 以上有独立的编号列，这里就不重复显示（两者二选一）。
+   槽位宽度写死：表头在同一位置放一段同样宽的留白，「任务」才会落在标题正上方，
+   而不是压在 fx-N 上被读成编号列的表头。10px 下到 fx-999 都放得下，
+   再长只会吃掉后面 8px 的间距，不会把标题顶开。 */
 .fxk-task-seq {
   display: none; flex: none;
-  font-family: var(--fxk-mono); font-size: 10.5px; line-height: 16px;
-  font-variant-numeric: tabular-nums; letter-spacing: .02em; color: var(--fxk-text-3);
+  width: 38px;
+  font-family: var(--fxk-mono); font-size: 10px; line-height: 16px;
+  font-variant-numeric: tabular-nums; letter-spacing: .02em;
+  color: var(--fxk-text-3); opacity: .7; white-space: nowrap;
 }
 .fxk-td-task { overflow: hidden; }
 .fxk-task { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -1237,7 +1247,9 @@ window.__ModuleLoader__.load({
   .fxk-table th.c-status, .fxk-table th.c-seq, .fxk-table th.c-dur, .fxk-table th.c-upd,
   .fxk-table td.c-status, .fxk-table td.c-seq, .fxk-table td.c-dur, .fxk-table td.c-upd { display: none; }
   .fxk-table thead th.c-acts { width: 96px; }
-  .fxk-table thead th.c-task { padding-left: 27px; }
+  /* 和 td.c-task 用同一条左内边距；色点 + 编号的留白由表头里的占位元素补，
+     不再靠 27px 这种手算值把「任务」硬推到数字上方。 */
+  .fxk-table thead th.c-task { padding-left: 12px; }
   .fxk-table tbody td.c-task { padding-left: 12px; }
   .fxk-table tbody td { height: 52px; }
   .fxk-table tbody td.c-acts { padding-right: 12px; }
@@ -1247,6 +1259,8 @@ window.__ModuleLoader__.load({
   .fxk-mob-dot[data-state="review"] { background: var(--fxk-warn); }
   .fxk-mob-dot[data-state="done"] { background: var(--fxk-ok); }
   .fxk-mob-timer { display: inline-flex; }
+  /* 手机版收掉「编号」列，编号改到标题前，所以这里才需要行内编号 */
+  .fxk-table .fxk-task-seq { display: inline-block; }
   .fxk-att, .fxk-table .fxk-chip { display: none; }
   .fxk-tablefoot { padding: 0 12px; }
   .fxk-foot-full { display: none; }
@@ -1254,18 +1268,15 @@ window.__ModuleLoader__.load({
   .fxk-addrow { padding: 0 12px; font-size: 11.5px; }
 }
 
-/* 编号列在 ≤1080px 时整列收起（下面两段各自收了它），所以这里统一把编号挪到标题前：
-   一个规则同时覆盖中等宽度和窄屏，省得两处各写一遍、以后改阈值漏掉一处。 */
-@container (max-width: 1080px) {
-  .fxk-table .fxk-task-seq { display: inline-block; }
-}
-
-/* 中等宽度（分屏 / 平板）：保留状态和任务，收起编号 / 用时 / 更新，
-   避免固定列把任务标题挤成一条缝。表尾负责告诉你当前按哪一列排序。 */
-@container (min-width: 701px) and (max-width: 1080px) {
-  .fxk-table th.c-seq, .fxk-table th.c-dur, .fxk-table th.c-upd,
-  .fxk-table td.c-seq, .fxk-table td.c-dur, .fxk-table td.c-upd { display: none; }
-  .fxk-mob-timer { display: inline-flex; }
+/* 中等宽度（分屏 / 平板）：六个表头一个都不收。收起会让表头少一格、
+   编号只剩行内前缀，看起来像表头缺了一块；这里只把固定列压窄，给标题留出空间。
+   960px 以上保持和宽屏完全一样，不做任何调整。 */
+@container (min-width: 701px) and (max-width: 960px) {
+  .fxk-table thead th.c-status { width: 96px; }
+  .fxk-table thead th.c-seq { width: 70px; }
+  .fxk-table thead th.c-dur { width: 88px; }
+  .fxk-table thead th.c-upd { width: 112px; }
+  .fxk-table thead th.c-acts { width: 96px; }
   .fxk-foot-full { display: none; }
   .fxk-foot-short { display: inline; }
 }
@@ -3647,6 +3658,19 @@ window.__ModuleLoader__.load({
       }
 
       // ---------------------------------------------------------------- list
+      /**
+       * 任务列表头前的留白：行里是「状态点 + 编号 + 标题」，
+       * 表头也得占住点 + 编号这两段，否则「任务」会压到 fx-N 上方、
+       * 读起来像编号列的表头。复用行内同名的 class，宽度和出现时机自动一致：
+       * 两个 class 都只在 ≤700px 的手机版出现。
+       */
+      const listHeadLead = (column) =>
+        column.key === 'title'
+          ? [
+              h('span', { key: 'lead-dot', className: 'fxk-mob-dot', 'aria-hidden': 'true' }),
+              h('span', { key: 'lead-seq', className: 'fxk-task-seq', 'aria-hidden': 'true' }),
+            ]
+          : []
       const renderListHeadCell = (column) => {
         const active = sort.key === column.key
         const className = `fxk-thcell ${column.cls}${column.align === 'right' ? ' is-right' : ''}`
@@ -3670,6 +3694,7 @@ window.__ModuleLoader__.load({
               title: t(`按${column.zh}排序`, `Sort by ${column.en}`),
               onClick: () => toggleSort(column.key),
             },
+            listHeadLead(column),
             h('span', null, t(column.zh, column.en)),
             h(IconSort, { active, dir: active ? sort.dir : column.dir }),
           ),
@@ -3823,10 +3848,16 @@ window.__ModuleLoader__.load({
                         : statusLabelOf(state),
                 },
               ),
-              // 编号列在 ≤1080px 收起时，编号改在这里出现（CSS 二选一，宽屏不重复）
-              seqLabel
-                ? h('span', { className: 'fxk-task-seq', title: t(`卡片编号 ${seqLabel}`, `Card number ${seqLabel}`) }, seqLabel)
-                : null,
+              // 编号列只在手机版（≤700px）收起，那时编号改在这里出现（CSS 二选一，更宽时不重复）。
+              // 没编号的卡片也占住同一段槽位，每行标题都从同一条 x 开始，和表头留白对得上。
+              h(
+                'span',
+                {
+                  className: 'fxk-task-seq',
+                  title: seqLabel ? t(`卡片编号 ${seqLabel}`, `Card number ${seqLabel}`) : undefined,
+                },
+                seqLabel || '',
+              ),
               h('button', {
                 type: 'button',
                 className: 'fxk-title',

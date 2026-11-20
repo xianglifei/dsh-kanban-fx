@@ -107,7 +107,7 @@ and this version has no cancel. Works with DSH `0.2.2-rc.3`.
 - Card numbers (`fx-1`, `fx-2`, …) are never reused. They appear as the first chip under a board card's title
   (click to copy; a card that already has a worktree uses the `⎇ fx-12-…` branch chip instead, so the number is
   not repeated), in front of the title on a collapsed done row, and in the list — its own “No.” column, or, once
-  that column is dropped below 1080px, in front of the task title.
+  that column is dropped on the phone layout (≤700px), in front of the task title.
 
 ## Upgrading
 
@@ -163,8 +163,16 @@ already have a worktree, and does nothing when there are none. Refresh the page;
 
 0.10.2 is client-only: the card number now shows on board cards (first chip in the row under the title, click to
 copy) and in front of the title on collapsed done rows. In the list the “No.” column still appears at wide
-widths; below 1080px, where that column is dropped, the number moves in front of the task title instead of
-disappearing. Refresh the page; nothing changes on the Host.
+widths; on the phone layout (≤700px), where that column is dropped, the number moves in front of the task
+title instead of disappearing. Refresh the page; nothing changes on the Host.
+
+0.10.3 is client-only: the list keeps all six headers from 701px up. Only below 960px are the fixed columns
+narrowed (status 96, No. 70, duration 88, updated 112, actions 96 — 462px total), which still leaves the title
+column about 180px on a 701px panel; from 960px up the widths are identical to the wide layout. The phone layout
+(≤700px) still collapses to Task / Actions and moves the number in front of the title. There the “Task” header now
+lines up with the title text (88 = 88 at 650px) instead of sitting on top of the inline `fx-N`: the header reserves
+the same leading slot as a row, the inline number keeps a fixed 38px slot (fits up to `fx-999`) and is dimmed.
+Refresh the page; nothing changes on the Host.
 
 ## Reference
 
