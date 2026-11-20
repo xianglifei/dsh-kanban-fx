@@ -104,7 +104,10 @@ and this version has no cancel. Works with DSH `0.2.2-rc.3`.
 - Board file: `$DSH_HOME/dsh-kanban-fx/board.json` (default `~/.dsh/dsh-kanban-fx/board.json`). Uninstalling the
   plugin leaves it on disk.
 - Card body limit 200,000 characters; attachments 24 MB per card (change in `cordis.patch.yml`, restart to apply).
-- Card IDs (`fx-1`, `fx-2`, …) are click-to-copy and never reused.
+- Card numbers (`fx-1`, `fx-2`, …) are never reused. They appear as the first chip under a board card's title
+  (click to copy; a card that already has a worktree uses the `⎇ fx-12-…` branch chip instead, so the number is
+  not repeated), in front of the title on a collapsed done row, and in the list — its own “No.” column, or, once
+  that column is dropped below 1080px, in front of the task title.
 
 ## Upgrading
 
@@ -157,6 +160,11 @@ pointer whose “Settings → Plugins” switches to the Plugins page. The long 
 summary note were dropped, and the completion reminder moved under the merge-state switch that decides it. Merge
 state keeps its default-on state when the entry is off or the service is missing — it only covers cards that
 already have a worktree, and does nothing when there are none. Refresh the page; nothing changes on the Host.
+
+0.10.2 is client-only: the card number now shows on board cards (first chip in the row under the title, click to
+copy) and in front of the title on collapsed done rows. In the list the “No.” column still appears at wide
+widths; below 1080px, where that column is dropped, the number moves in front of the task title instead of
+disappearing. Refresh the page; nothing changes on the Host.
 
 ## Reference
 

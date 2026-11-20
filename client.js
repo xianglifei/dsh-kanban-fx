@@ -629,6 +629,22 @@ window.__ModuleLoader__.load({
    外观沿用普通 chip，只补按钮的默认边框和 hover——它不该比旁边的分支 chip 更抢眼。 */
 .fxk-chip-ws { border: 0; cursor: pointer; }
 .fxk-chip-ws:hover { background: color-mix(in srgb, var(--fxk-text-3) 16%, transparent); color: var(--fxk-text); }
+/* 卡片编号 chip：它是卡片的身份，不是状态——所以等宽小字、默认无底色，安静地排在这行最前面。
+   本身就是按钮，点一下复制，方便在会话里直接说「处理 fx-12」。 */
+.fxk-chip-seq {
+  flex: none; max-width: none; padding: 0 5px;
+  border: 0; background: transparent; color: var(--fxk-text-3);
+  font-family: var(--fxk-mono); font-size: 10.5px; line-height: 16px;
+  font-variant-numeric: tabular-nums; letter-spacing: .02em;
+  cursor: copy;
+}
+.fxk-chip-seq:hover { background: var(--fxk-hover); color: var(--fxk-text-2); }
+.fxk-chip-seq:focus-visible { outline: 1.5px solid color-mix(in srgb, var(--fxk-link) 60%, transparent); outline-offset: 1px; }
+/* 已完成折叠行里的编号：只有一行，编号排在标题前、不抢宽度 */
+.fxk-folded-seq {
+  flex: none; font-family: var(--fxk-mono); font-size: 10px; line-height: 16px;
+  font-variant-numeric: tabular-nums; letter-spacing: .02em; color: var(--fxk-text-3);
+}
 /* 已完成折叠行里的那一枚：行很窄，先收名字、再整枚收起（和右侧合并结论同一套取舍） */
 .fxk-ws-folded { flex: none; max-width: 96px; }
 @container (max-width: 220px) {
@@ -827,6 +843,13 @@ window.__ModuleLoader__.load({
 .fxk-table tbody tr:hover td { background: var(--fxk-hover); }
 .fxk-table tbody tr:focus-within td { background: color-mix(in srgb, var(--fxk-link) 6%, transparent); }
 .fxk-td-seq { font-family: var(--fxk-mono); font-size: 10.5px; line-height: 16px; letter-spacing: .02em; color: var(--fxk-text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 列表窄 / 中宽度时「编号」列整列收起，编号改在任务标题前用等宽小字给出；
+   宽屏有独立的编号列，这里就不重复显示（两者二选一）。 */
+.fxk-task-seq {
+  display: none; flex: none;
+  font-family: var(--fxk-mono); font-size: 10.5px; line-height: 16px;
+  font-variant-numeric: tabular-nums; letter-spacing: .02em; color: var(--fxk-text-3);
+}
 .fxk-td-task { overflow: hidden; }
 .fxk-task { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .fxk-title {
@@ -1229,6 +1252,12 @@ window.__ModuleLoader__.load({
   .fxk-foot-full { display: none; }
   .fxk-foot-short { display: inline; }
   .fxk-addrow { padding: 0 12px; font-size: 11.5px; }
+}
+
+/* 编号列在 ≤1080px 时整列收起（下面两段各自收了它），所以这里统一把编号挪到标题前：
+   一个规则同时覆盖中等宽度和窄屏，省得两处各写一遍、以后改阈值漏掉一处。 */
+@container (max-width: 1080px) {
+  .fxk-table .fxk-task-seq { display: inline-block; }
 }
 
 /* 中等宽度（分屏 / 平板）：保留状态和任务，收起编号 / 用时 / 更新，
@@ -3221,6 +3250,43 @@ window.__ModuleLoader__.load({
         )
       }
 
+      /**
+       * 卡片编号 chip（`fx-12`）：卡片自己的身份，看板卡片和列表都靠它说话。
+       * 它本身是按钮——点一下复制，方便在会话里直接说「处理 fx-12」；
+       * 没落库的草稿没有编号，返回 null（chip 行照旧渲染，高度不变）。
+       *
+       * 已经有检出的卡片不重复这一枚：旁边的分支 chip 本身就写着 `⎇ fx-12-…`，
+       * 数就在开头；多一枚只会把 chip 行挤到第二行。建树失败（有分支名但没检出目录）
+       * 的卡片只剩「工作树失败」，编号照旧补上。
+       */
+      const seqChipOf = (card) => {
+        const label = cardSeqLabel(card)
+        if (!label) return null
+        const worktree = card.worktree
+        if (worktree && worktree.path && worktree.branch) return null
+        return h(
+          'button',
+          {
+            type: 'button',
+            className: 'fxk-chip fxk-chip-seq',
+            title: t(`卡片编号 ${label}，点一下复制`, `Card number ${label} — click to copy`),
+            'aria-label': t(`复制卡片编号 ${label}`, `Copy card number ${label}`),
+            onClick: (event) => {
+              // chip 长在整张卡（role=button）里面：别让点它变成打开会话
+              event.stopPropagation()
+              void copyText(label).then((ok) => {
+                notify({
+                  text: ok
+                    ? t(`已复制编号 ${label}`, `Copied ${label}`)
+                    : t(`复制失败，编号 ${label}`, `Copy failed — ${label}`),
+                })
+              })
+            },
+          },
+          label,
+        )
+      }
+
       const renderCard = (card) => {
         const state = card.status
         const isDone = state === 'done'
@@ -3231,6 +3297,7 @@ window.__ModuleLoader__.load({
         // 高度由 CSS 的 min-height 钉成一行 chip——卡片尺寸不随 chip 增减变化，
         // 切到「全部工作区」（多出工作区胶囊）时也不会跳。
         const metaChips = [
+          seqChipOf(card),
           workspaceChipOf(card),
           card.workspaceId && !title ? h('span', { className: 'fxk-chip fxk-chip-warn' }, t('工作区不可用', 'Workspace missing')) : null,
           worktreeChipOf(card, mergeStateOn, copyMergeCommand),
@@ -3243,6 +3310,8 @@ window.__ModuleLoader__.load({
 
         // 已完成列默认只留标题行：整行点开才展开成完整卡片，避免已归档的卡片一直占满一整列。
         if (isFolded) {
+          // 折叠行也带上编号：一整列已完成里，只有编号能和你记的那张对上
+          const foldedLabel = cardSeqLabel(card)
           return h(
             'div',
             {
@@ -3265,6 +3334,7 @@ window.__ModuleLoader__.load({
               },
             },
             h('span', { className: 'fxk-caret', 'aria-hidden': 'true' }),
+            foldedLabel ? h('span', { className: 'fxk-folded-seq' }, foldedLabel) : null,
             h('span', { className: 'fxk-card-title fxk-card-title-folded' }, card.title),
             workspaceChipOf(card, 'fxk-ws-folded'),
             foldedMergeOf(card),
@@ -3611,6 +3681,7 @@ window.__ModuleLoader__.load({
         // 进行中里「等你回答」的那一档：状态仍是进行中，只是这一轮卡在用户这边
         const awaiting = state === 'running' && Boolean(card.awaiting)
         const attachmentCount = (card.attachments || []).length
+        const seqLabel = cardSeqLabel(card)
         const updatedAt = Number(card.updatedAt) || Number(card.createdAt) || 0
         const elapsed = elapsedOf(card)
         const duration =
@@ -3752,6 +3823,10 @@ window.__ModuleLoader__.load({
                         : statusLabelOf(state),
                 },
               ),
+              // 编号列在 ≤1080px 收起时，编号改在这里出现（CSS 二选一，宽屏不重复）
+              seqLabel
+                ? h('span', { className: 'fxk-task-seq', title: t(`卡片编号 ${seqLabel}`, `Card number ${seqLabel}`) }, seqLabel)
+                : null,
               h('button', {
                 type: 'button',
                 className: 'fxk-title',
