@@ -610,7 +610,9 @@ window.__ModuleLoader__.load({
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   white-space: pre-wrap; word-break: break-word;
 }
-.fxk-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; line-height: 16px; color: var(--fxk-text-2); }
+/* 这一行始终占住一枚 chip 的高度（18px），哪怕一个 chip 都没有：
+   卡片高度因此不随 chip 增减变化，切到「全部工作区」多出工作区胶囊时也不会跳。 */
+.fxk-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 18px; font-size: 11px; line-height: 16px; color: var(--fxk-text-2); }
 .fxk-chip {
   display: inline-flex; align-items: center; gap: 4px;
   max-width: 150px; height: 18px; padding: 0 6px;
@@ -3201,8 +3203,9 @@ window.__ModuleLoader__.load({
         const isFolded = isDone && !expandedDone.has(card.id)
         const title = workspaceTitle(card.workspaceId)
         const attachmentCount = (card.attachments || []).length
-        // 卡片中段那一行 chip。可能一个都没有（普通卡 + 关了合并状态）：那就整行不渲染，
-        // 否则空 div 会被 .fxk-card 的 gap 撑出两段空白。
+        // 卡片中段那一行 chip。可能一个都没有（普通卡 + 关了合并状态）：这一行照样渲染、只留空，
+        // 高度由 CSS 的 min-height 钉成一行 chip——卡片尺寸不随 chip 增减变化，
+        // 切到「全部工作区」（多出工作区胶囊）时也不会跳。
         const metaChips = [
           workspaceChipOf(card),
           card.workspaceId && !title ? h('span', { className: 'fxk-chip fxk-chip-warn' }, t('工作区不可用', 'Workspace missing')) : null,
@@ -3292,7 +3295,7 @@ window.__ModuleLoader__.load({
           },
           titleNode,
           card.body ? h('div', { className: 'fxk-card-excerpt' }, excerptOf(card.body)) : null,
-          metaChips.length > 0 ? h('div', { className: 'fxk-card-meta' }, ...metaChips) : null,
+          h('div', { className: 'fxk-card-meta' }, ...metaChips),
           state === 'running'
             ? h(
                 'div',

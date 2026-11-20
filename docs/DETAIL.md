@@ -53,7 +53,9 @@ It is a label on Running, not a fifth status, and it never enters Review until t
   offers **All workspaces**, putting every repository's cards on one board; the option is hidden when only one
   workspace exists. Creating a card there leaves the workspace empty until you pick one — nothing is saved before that.
 - In the All view every card carries a small workspace chip (click it to narrow the board to that workspace).
-  Other views hide it, because there the chip would only repeat the switcher.
+  Other views hide it, because there the chip would only repeat the switcher. The meta row it lives in is still
+  kept, empty (fixed at one chip's 18px), so a card never changes height — switching to All, or turning merge
+  state on and off, does not resize the columns.
 - View and sort order are stored in browser localStorage.
 
 ## Finish behavior
