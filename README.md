@@ -6,7 +6,7 @@
 点「执行」就直接在对应工作区开会话、把卡片内容投进去开跑；跑完、报错、暂停，状态都挂在卡片上，
 回看板就知道做到哪了。
 
-[![version](https://img.shields.io/badge/version-0.10.0-1f6feb?style=flat-square)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.10.1-1f6feb?style=flat-square)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-3fb950?style=flat-square)](LICENSE)
 [![DSH](https://img.shields.io/badge/DSH-%5E0.2.2--rc.1-8957e5?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
 
@@ -98,9 +98,13 @@ v1 不支持拖拽或手动改状态。
 可以打开工作树——但**工作树不是看板自己实现的**，它调用的是 DSH 自带的服务：
 
 1. **先开 DSH 的服务**：设置 → 插件 → 启用**「变更请求与工作树」**，按提示重启 DSH。看板会探测这个服务；
-   没启用时，看板设置里的开关是灰的，并直接告诉你来这里开。
+   没启用时，看板设置里的开关是灰的，「服务未启用」就贴在开关标题旁，分组标题后面有一行可点的
+   「设置 → 插件」，点了直接带你到插件页。
 2. **再开看板的入口**：设置（齿轮）→ **实验功能** → 「在卡片上提供独立工作树」。
 3. **按卡勾选**：新建 / 编辑卡片时多一个「在独立 worktree 中运行」，默认不勾；要不要隔离某张卡，由建卡的人决定。
+
+实验功能里还有一组「工作树卡片的合并状态」，其中「在已完成列标出分支合并状态」默认开——它只管已经建过工作树的卡片，
+**不依赖**上面的入口，也不需要工作树服务；一张工作树卡片都没有时它什么也不做。
 
 勾上的卡片第一次执行时：先在仓库 `.agents/worktrees/` 下新建分支 `fx-<编号>-<标题片段>` 和检出目录，
 把会话目录切过去，再投递内容；会话里会自动带上新的工作目录说明。源目录保持原样，未提交的改动**不会**带过去。

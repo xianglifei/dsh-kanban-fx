@@ -1100,18 +1100,30 @@ window.__ModuleLoader__.load({
 }
 .fxk-check:hover { border-color: color-mix(in srgb, var(--fxk-brand) 30%, var(--fxk-border)); }
 .fxk-check[data-checked="true"] { border-color: color-mix(in srgb, var(--fxk-brand) 42%, var(--fxk-border)); background: color-mix(in srgb, var(--fxk-brand) 5%, var(--fxk-surface)); }
-.fxk-check[data-disabled="true"] { cursor: not-allowed; opacity: .6; }
+.fxk-check[data-disabled="true"] { cursor: not-allowed; }
+.fxk-check[data-disabled="true"]:hover { border-color: var(--fxk-border); }
+.fxk-check[data-disabled="true"][data-checked="true"] { border-color: var(--fxk-border); background: var(--fxk-surface); }
+.fxk-check[data-disabled="true"] input,
+.fxk-check[data-disabled="true"] .fxk-check-title,
+.fxk-check[data-disabled="true"] .fxk-check-desc,
+.fxk-check[data-disabled="true"] .fxk-check-hint { opacity: .6; }
 .fxk-check:focus-within { outline: 2px solid color-mix(in srgb, var(--fxk-link) 70%, transparent); outline-offset: 2px; }
 .fxk-check input { flex: none; width: 15px; height: 15px; margin: 1px 0 0; accent-color: var(--fxk-brand); cursor: inherit; }
 .fxk-check-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fxk-check-title-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .fxk-check-title { font-size: 12.5px; line-height: 18px; font-weight: 560; color: var(--fxk-text); }
 .fxk-check-desc { font-size: 11.5px; line-height: 17px; color: var(--fxk-text-2); }
 .fxk-check-hint { font-size: 11.5px; line-height: 17px; color: var(--fxk-text-3); }
-.fxk-settings-cap {
-  display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
-  margin-top: 12px;
-  font-size: 11.5px; line-height: 17px; color: var(--fxk-text-2);
+.fxk-settings-group-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 16px 0 8px; }
+.fxk-settings-group-head .fxk-settings-subhead { margin: 0; }
+.fxk-settings-group-note { font-size: 11.5px; line-height: 17px; color: var(--fxk-text-3); }
+.fxk-link {
+  border: 0; background: none; padding: 0;
+  font: inherit; color: var(--fxk-link); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
 }
+.fxk-link:hover { text-decoration-thickness: 2px; }
+.fxk-link:focus-visible { outline: 2px solid color-mix(in srgb, var(--fxk-link) 70%, transparent); outline-offset: 2px; border-radius: 3px; }
 .fxk-settings-subhead { margin: 16px 0 2px; font-size: 11.5px; line-height: 17px; font-weight: 560; color: var(--fxk-text-2); }
 .fxk-advanced { display: flex; flex-direction: column; }
 .fxk-advanced-row { display: flex; align-items: center; gap: 16px; padding: 8px 0; border-top: 1px solid var(--fxk-border-soft); font-size: 12px; line-height: 18px; }
@@ -2142,6 +2154,21 @@ window.__ModuleLoader__.load({
       const [mergeSaving, setMergeSaving] = useState(false)
       const [mergeFailure, setMergeFailure] = useState('')
 
+      // 插件页是全局面板（id 由 ui-plugin-manager 注册，默认组合里一定有）；
+      // 用 layout 服务直接切过去，等于侧边栏点「插件」。失败时退回一句人话，不留死链接。
+      const openPluginsPage = () => {
+        const layout = pluginCtx?.get('layout')
+        if (layout && typeof layout.selectPanel === 'function') {
+          try {
+            layout.selectPanel('plugins')
+            return
+          } catch (failure) {
+            console.error('[kanban-fx] 打开插件页失败：', failure)
+          }
+        }
+        props.notify?.({ text: t('打不开插件页，请从侧边栏的「插件」进入', 'Could not open the plugin page — use “Plugins” in the sidebar') })
+      }
+
       const toggleWorktree = async (next) => {
         setWorktreeSaving(true)
         setWorktreeFailure('')
@@ -2356,12 +2383,22 @@ window.__ModuleLoader__.load({
                     { key: 'worktree', className: 'fxk-settings-card' },
                     h('h2', null, t('实验功能', 'Experimental')),
                     h(
-                      'p',
-                      { className: 'fxk-settings-desc' },
-                      t(
-                        '「独立工作树」基于 DSH 自带的 Git 工作树服务。看板只负责在卡片上给一个入口；建分支、切目录、归档清理都由 DSH 完成。',
-                        'The isolated worktree builds on DSH’s own Git worktree service. The board only adds a per-card entry; creating the branch, switching directories, and archive cleanup all stay in DSH.',
-                      ),
+                      'div',
+                      { className: 'fxk-settings-group-head' },
+                      h('h3', { className: 'fxk-settings-subhead' }, t('独立工作树入口', 'Worktree entry')),
+                      worktreeAvailable
+                        ? null
+                        : h(
+                            'span',
+                            { className: 'fxk-settings-group-note' },
+                            t('去「', 'Enable “Change requests & worktrees” in '),
+                            h(
+                              'button',
+                              { type: 'button', className: 'fxk-link', onClick: openPluginsPage },
+                              t('设置 → 插件', 'Settings → Plugins'),
+                            ),
+                            t('」启用「变更请求与工作树」', ''),
+                          ),
                     ),
                     h(
                       'label',
@@ -2377,6 +2414,7 @@ window.__ModuleLoader__.load({
                         type: 'checkbox',
                         checked: worktreeOffer,
                         disabled: !worktreeAvailable || disabled || worktreeSaving,
+                        'aria-labelledby': 'fxk-worktree-offer-title',
                         'aria-describedby': 'fxk-worktree-offer-desc',
                         onChange: (event) => void toggleWorktree(event.target.checked),
                       }),
@@ -2385,44 +2423,29 @@ window.__ModuleLoader__.load({
                         { className: 'fxk-check-text' },
                         h(
                           'span',
-                          { className: 'fxk-check-title' },
-                          worktreeSaving
-                            ? t('正在保存…', 'Saving…')
-                            : t('在卡片上提供「独立工作树」', 'Offer an isolated worktree on cards'),
+                          { className: 'fxk-check-title-row' },
+                          h(
+                            'span',
+                            { id: 'fxk-worktree-offer-title', className: 'fxk-check-title' },
+                            worktreeSaving
+                              ? t('正在保存…', 'Saving…')
+                              : t('在卡片上提供「独立工作树」', 'Offer an isolated worktree on cards'),
+                          ),
+                          worktreeAvailable
+                            ? null
+                            : h('span', { className: 'fxk-chip fxk-chip-warn' }, t('服务未启用', 'Service not enabled')),
                         ),
                         h(
                           'span',
                           { id: 'fxk-worktree-offer-desc', className: 'fxk-check-desc' },
                           t(
-                            '打开后，新建或编辑卡片可以勾选在独立 worktree 里运行；第一次执行时会在仓库 .agents/worktrees/ 下新建分支与检出。卡片默认不勾。',
-                            'When on, new or edited cards can run in their own worktree; the first run creates a branch and checkout under .agents/worktrees/. Cards stay unchecked by default.',
-                          ),
-                        ),
-                        h(
-                          'span',
-                          { className: 'fxk-check-hint' },
-                          t(
-                            '↳ 点「完成」时如果这条分支还没合并，会先提醒你一次（「仍然完成 / 先去合并」）；不想要提醒，关掉下面的「合并状态」。',
-                            '↳ If the branch is unmerged when you mark a card done, you get one reminder (“Mark done anyway / Merge first”). Turn off the merge-state switch below to skip it.',
+                            '打开后，新建或编辑卡片可以勾选「在独立 worktree 中运行」；创建工作树（分支与检出，在仓库 .agents/worktrees/ 下）、切目录与归档清理都由 DSH 的工作树服务完成。卡片默认不勾。',
+                            'When on, new or edited cards can tick “Run in an isolated worktree”; creating the worktree (a branch and checkout under .agents/worktrees/), switching directories, and archive cleanup are all handled by DSH’s worktree service. Cards stay unchecked by default.',
                           ),
                         ),
                       ),
                     ),
-                    worktreeAvailable
-                      ? null
-                      : h(
-                          'div',
-                          { className: 'fxk-settings-cap' },
-                          h('span', { className: 'fxk-chip fxk-chip-warn' }, t('服务未启用', 'Service not enabled')),
-                          h(
-                            'span',
-                            null,
-                            t(
-                              '去「设置 → 插件」启用「变更请求与工作树」，重启后这里就能打开。启用后，看板建的工作树也会出现在会话的 Forge 面板里。',
-                              'Enable “Change requests & worktrees” under Settings → Plugins, then restart to turn this on. Once enabled, the board’s worktrees also show up in the session’s Forge panel.',
-                            ),
-                          ),
-                        ),
+                    h('h3', { className: 'fxk-settings-subhead' }, t('工作树卡片的合并状态', 'Merge state for worktree cards')),
                     h(
                       'label',
                       {
@@ -2438,6 +2461,7 @@ window.__ModuleLoader__.load({
                         type: 'checkbox',
                         checked: mergeStateOn,
                         disabled: disabled || mergeSaving,
+                        'aria-labelledby': 'fxk-merge-state-title',
                         'aria-describedby': 'fxk-merge-state-desc',
                         onChange: (event) => void toggleMergeState(event.target.checked),
                       }),
@@ -2446,7 +2470,7 @@ window.__ModuleLoader__.load({
                         { className: 'fxk-check-text' },
                         h(
                           'span',
-                          { className: 'fxk-check-title' },
+                          { id: 'fxk-merge-state-title', className: 'fxk-check-title' },
                           mergeSaving
                             ? t('正在保存…', 'Saving…')
                             : t('在已完成列标出分支合并状态', 'Show branch merge state on done cards'),
@@ -2455,8 +2479,16 @@ window.__ModuleLoader__.load({
                           'span',
                           { id: 'fxk-merge-state-desc', className: 'fxk-check-desc' },
                           t(
-                            '每 60 秒用只读 Git 查一次：未合并 / 已合并 / 已合并，已删 / 无改动，折叠行右侧就能看到。squash、rebase 合并可能认不出来。',
-                            'Checks once a minute with read-only Git: unmerged / merged / merged-deleted / no commits, shown on the folded done rows. Squash and rebase merges may not be detected.',
+                            '每 60 秒用只读 Git 查一次：未合并 / 已合并 / 已合并，已删 / 无改动，折叠行右侧就能看到；只对已经建过工作树的卡片生效，一张都没有时它什么也不做。入口关着或服务未启用也照常工作。squash、rebase 合并可能认不出来。',
+                            'Checks once a minute with read-only Git: unmerged / merged / merged-deleted / no commits, shown on the folded done rows. It only affects cards that already have a worktree and does nothing when there are none; it keeps working when the entry is off or the service is not enabled. Squash and rebase merges may not be detected.',
+                          ),
+                        ),
+                        h(
+                          'span',
+                          { className: 'fxk-check-hint' },
+                          t(
+                            '↳ 打开时，点「完成」如果这条分支还没合并，会先提醒你一次（「仍然完成 / 先去合并」）；不想被提醒就关掉这个开关。',
+                            '↳ When on, marking a card done with an unmerged branch gives one reminder (“Mark done anyway / Merge first”); turn this switch off to skip it.',
                           ),
                         ),
                       ),
@@ -2465,14 +2497,6 @@ window.__ModuleLoader__.load({
                     worktreeFailure
                       ? h('p', { className: 'fxk-settings-error', role: 'alert' }, worktreeFailure)
                       : null,
-                    h(
-                      'p',
-                      { className: 'fxk-settings-note' },
-                      t(
-                        '第一个开关只决定卡片上要不要出现「独立工作树」选项，某张卡片要不要隔离永远由建卡的人决定；第二个只读 Git，不改仓库、不 fetch。',
-                        'The first switch only controls whether the worktree option appears on cards — whether a card needs isolation is always the card author’s call. The second only reads Git: no fetch, no repository changes.',
-                      ),
-                    ),
                   ),
                   h(
                     'section',

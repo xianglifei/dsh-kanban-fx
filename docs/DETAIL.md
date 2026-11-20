@@ -77,6 +77,15 @@ worktrees itself: it calls DSH's own worktree service.
 2. In the board, open Settings (gear) → **Experimental** → “Offer an isolated worktree on cards”.
 3. On a new or edited card, tick **“Run in an isolated worktree”** (off by default).
 
+Experimental now has two labelled groups: **“Worktree entry”** and **“Merge state for worktree cards”**, with no
+card-level intro and no divider. The entry switch's own description carries the checkout location
+(`.agents/worktrees/`) and the fact that DSH's worktree service handles the rest. “Service not enabled” sits as a
+chip next to that switch's title, and the group heading carries a short pointer whose **“Settings → Plugins”** is a
+link that switches straight to the Plugins page. **“Show branch merge state on done cards”** (on by default) only
+reads Git for cards that already carry a worktree record. It does not depend on the entry switch and needs no
+worktree service; with no worktree cards it does nothing. The completion reminder (“Mark done anyway / Merge
+first”) sits under the merge-state switch that decides it.
+
 On the card's first run the plugin creates a branch `fx-<number>-<title-slug>` and a checkout under
 `<repo>/.agents/worktrees/`, switches the session directory there, and then sends the card content. The source
 checkout is untouched; uncommitted changes are not copied. The card shows a branch chip (branch icon + branch
@@ -140,6 +149,14 @@ replaces “Let the conversation merge” when the conversation is archived). If
 uncommitted files are left, the dialog keeps just “Complete anyway” and says to commit or copy them first. The
 “merge” action sends the message immediately (it does not prefill a draft). Refresh the page; nothing changes on the
 Host.
+
+0.10.1 is client-only copy and layout: Experimental now has two labelled groups (“Worktree entry”, “Merge state for
+worktree cards”) with no divider between them. The former card intro was merged into the entry switch's
+description, the “service not enabled” chip moved next to the switch title, and the group heading gained a short
+pointer whose “Settings → Plugins” switches to the Plugins page. The long restart/Forge paragraph and the bottom
+summary note were dropped, and the completion reminder moved under the merge-state switch that decides it. Merge
+state keeps its default-on state when the entry is off or the service is missing — it only covers cards that
+already have a worktree, and does nothing when there are none. Refresh the page; nothing changes on the Host.
 
 ## Reference
 
