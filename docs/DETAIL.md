@@ -174,6 +174,12 @@ lines up with the title text (88 = 88 at 650px) instead of sitting on top of the
 the same leading slot as a row, the inline number keeps a fixed 38px slot (fits up to `fx-999`) and is dimmed.
 Refresh the page; nothing changes on the Host.
 
+0.10.4 is client-only: the session title bar now starts with the card number (`fx-11`) — a quiet monospace chip,
+click to copy, showing “✓ 已复制” for 1.4s and then back (“复制失败” when the clipboard is unavailable). It
+survives the 620px breakpoint that collapses the state label and the branch name to screen-reader text. Unlike
+board cards, the header keeps the number even next to a worktree branch chip: one row, no wrapping. Refresh the
+page; nothing changes on the Host.
+
 ## Reference
 
 Interface details, autosave, title derivation, card numbering, storage schema, Host endpoints, and the run /

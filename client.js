@@ -1346,6 +1346,28 @@ window.__ModuleLoader__.load({
 .fxk-hd-state[data-state="awaiting"] .fxk-hd-dot { background: var(--fxk-hd-review); }
 .fxk-hd-state[data-state="review"] .fxk-hd-dot { background: var(--fxk-hd-review); }
 .fxk-hd-state[data-state="done"] .fxk-hd-dot { background: var(--fxk-hd-done); }
+/* 卡片编号：标题栏里最安静的身份标——不加圆点、不描边，只在 hover 时浮起一层底色。
+   点一下复制，复制成功后短暂换成「✓ 已复制」，比只改 tooltip 更确定。 */
+.fxk-hd-seq {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 22px; padding: 0 5px;
+  border: 1px solid transparent; border-radius: 6px;
+  background: transparent;
+  color: var(--fxk-hd-text-3);
+  font-family: var(--fxk-hd-mono); font-size: 11px; line-height: 1; font-weight: 500;
+  letter-spacing: .02em; white-space: nowrap;
+  cursor: copy;
+  -webkit-app-region: no-drag;
+  transition: background .12s ease, color .12s ease;
+}
+.fxk-hd-seq:hover { background: var(--fxk-hd-fill); color: var(--fxk-hd-text-2); }
+.fxk-hd-seq:focus-visible { outline: 2px solid color-mix(in srgb, var(--fxk-hd-run) 45%, transparent); outline-offset: 1px; }
+.fxk-hd-seq[data-copied="ok"] { background: var(--fxk-hd-fill); color: var(--fxk-hd-text-2); cursor: default; }
+.fxk-hd-seq[data-copied="fail"] {
+  background: color-mix(in srgb, var(--fxk-hd-err) 10%, transparent);
+  color: color-mix(in srgb, var(--fxk-hd-err) 70%, var(--fxk-hd-text));
+  cursor: default;
+}
 /* 工作树位置：卡片勾了独立 worktree，会话就在 .agents/worktrees/ 的检出里跑，
    项目目录看不到这些改动。这枚分支标常驻标题栏：宽标题栏写分支名，窄标题栏只留图标；
    分支 / 目录 / 合并提醒都放进 tooltip。
@@ -5117,6 +5139,8 @@ window.__ModuleLoader__.load({
       // 分支上还有没合并的提交：第一次点「完成」只把按钮变成确认，第二次才真的标
       const [confirming, setConfirming] = useState(false)
       const [mergeStateOn, setMergeStateOn] = useState(true)
+      // 编号复制反馈：'' | 'ok' | 'fail'，1.4 秒后自己收掉
+      const [seqCopy, setSeqCopy] = useState('')
       const running = useSession((snapshot) => snapshot.running)
       const alive = useRef(true)
       const wasRunning = useRef(running)
@@ -5174,6 +5198,13 @@ window.__ModuleLoader__.load({
         const timer = window.setTimeout(() => setConfirming(false), 6000)
         return () => window.clearTimeout(timer)
       }, [confirming])
+
+      // 「✓ 已复制」/「复制失败」也自己收掉：换回 fx-N 之后标题栏宽度就回去了
+      useEffect(() => {
+        if (!seqCopy) return undefined
+        const timer = window.setTimeout(() => setSeqCopy(''), 1400)
+        return () => window.clearTimeout(timer)
+      }, [seqCopy])
 
       if (card === undefined || card === null || card.sessionArchived) return null
 
@@ -5273,6 +5304,15 @@ window.__ModuleLoader__.load({
         }
       }
 
+      // 会话里也要看得到「这是 fx-几」：标题栏里点一下就能复制，粘贴到别的会话里说「处理 fx-11」。
+      const seqLabel = cardSeqLabel(card)
+      const copySeq = () => {
+        if (!seqLabel) return
+        void copyText(seqLabel).then((ok) => {
+          if (alive.current) setSeqCopy(ok ? 'ok' : 'fail')
+        })
+      }
+
       const doneHint =
         card.completionMode === 'prompt'
           ? card.seq
@@ -5325,6 +5365,28 @@ window.__ModuleLoader__.load({
       return h(
         'span',
         { className: 'fxk-hd' },
+        seqLabel
+          ? h(
+              'button',
+              {
+                type: 'button',
+                className: 'fxk-hd-seq',
+                'data-copied': seqCopy || undefined,
+                title: seqCopy === 'ok'
+                  ? t(`已复制编号 ${seqLabel}`, `Copied ${seqLabel}`)
+                  : seqCopy === 'fail'
+                    ? t(`复制失败，编号 ${seqLabel}`, `Copy failed — ${seqLabel}`)
+                    : t(`卡片编号 ${seqLabel}，点一下复制`, `Card number ${seqLabel} — click to copy`),
+                'aria-label': seqCopy === 'ok'
+                  ? t(`已复制编号 ${seqLabel}`, `Copied ${seqLabel}`)
+                  : seqCopy === 'fail'
+                    ? t(`复制失败，编号 ${seqLabel}`, `Copy failed — ${seqLabel}`)
+                    : t(`复制卡片编号 ${seqLabel}`, `Copy card number ${seqLabel}`),
+                onClick: copySeq,
+              },
+              seqCopy === 'ok' ? t('✓ 已复制', '✓ Copied') : seqCopy === 'fail' ? t('复制失败', 'Copy failed') : seqLabel,
+            )
+          : null,
         headerWorktreeOf(card, state),
         h(
           'span',
